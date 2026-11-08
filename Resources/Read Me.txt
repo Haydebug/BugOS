@@ -1,0 +1,33 @@
+BugOS 1.1.0
+===========
+
+A Windows 11-style taskbar, File Explorer and screenshot tool for your Mac, in one app.
+Needs a Mac with Apple silicon (M1 or newer) on macOS 15 Sequoia or newer.
+
+
+INSTALL
+1. Drag BugOS onto the Applications folder.
+2. Open BugOS from Applications.
+   The first time, macOS says it can't check BugOS for malicious software (it isn't
+   from the App Store). Click Done, then open System Settings › Privacy & Security,
+   scroll down and click "Open Anyway" next to BugOS. Open it once more.
+3. The BugOS page opens at Permissions. Click "Turn On…" next to each one and
+   switch BugOS on in the page that opens. Click Done.
+
+That's it. BugOS starts by itself when you log in, and folders open in File Explorer.
+
+
+SETTINGS
+Open BugOS any time (Applications or Spotlight) for its page:
+  Features       turn the taskbar, File Explorer or Squiggle on and off
+  Taskbar        size, icon alignment, background and opacity, previews, music
+  Quick Corner   reorder or hide its shortcuts
+  File Explorer  folders, Save/Open dialogs, new-window shortcut, views, panes
+  Squiggle       every shortcut (change or add your own), save folder, audio
+  General        start at login, the Mac Dock, restart a part, uninstall
+
+
+UNINSTALL
+Open BugOS › General › Uninstall. It puts your Mac back how it was: your Dock and
+hot corner, Finder for folders, no login item, no permission entries.
+Your screenshots and recordings are never deleted.

@@ -1,0 +1,3 @@
+#!/bin/bash
+# Nothing personal goes into a commit (tools/privacy-check.py).
+exec python3 "$(git rev-parse --show-toplevel)/tools/privacy-check.py" --staged

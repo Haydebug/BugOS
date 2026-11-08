@@ -1,0 +1,3 @@
+#!/bin/bash
+# Last look over every tracked file before anything leaves this Mac.
+exec python3 "$(git rev-parse --show-toplevel)/tools/privacy-check.py" --all
