@@ -42,6 +42,7 @@ final class TaskbarController: ObservableObject {
     lazy var preview = PreviewController(tracker: tracker, bar: self)
     lazy var startMenu = StartMenuController(tracker: tracker, bar: self)
     lazy var quickCorner = QuickCornerController(bar: self)
+    lazy var altTab = AltTabController(tracker: tracker, bar: self)
     var isDragging = false
     var suppressClicksUntil = Date.distantPast
     var menuOpen = false
@@ -68,6 +69,7 @@ final class TaskbarController: ObservableObject {
                 }
                 CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
                 QuickAccessHotkey.reload()
+                self?.altTab.reload()
                 self?.tracker.reloadSettings()
                 self?.style = BarStyle()
                 self?.layout()
@@ -76,6 +78,7 @@ final class TaskbarController: ObservableObject {
         AppHistory.shared.start()   // for Quick Access's "Recent"
         QuickAccessHotkey.corner = quickCorner
         QuickAccessHotkey.reload()
+        _ = altTab   // Alt-Tab listens from the start
         // Every space, but hidden by Mission Control / Exposé (macOS does that for "transient" windows).
         panel.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
         let root = TaskbarView(tracker: tracker, bar: self, nowPlaying: nowPlaying, style: self)

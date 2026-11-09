@@ -40,7 +40,7 @@ let explorerPrefs = PartPrefs(domain: BugOSID.explorer, changed: BugOSID.explore
 let squigglePrefs = PartPrefs(domain: BugOSID.squiggle, changed: BugOSID.squiggleSettingsChanged)
 
 enum PageSection: String, CaseIterable, Identifiable {
-    case general, features, permissions, taskbar, quickCorner, quickAccess, explorer, squiggle
+    case general, features, permissions, taskbar, altTab, quickCorner, quickAccess, explorer, squiggle
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -51,6 +51,7 @@ enum PageSection: String, CaseIterable, Identifiable {
         case .taskbar: "Taskbar"
         case .quickCorner: "Quick Corner"
         case .quickAccess: "Quick Access"
+        case .altTab: "Alt-Tab"
         case .explorer: "File Explorer"
         }
     }
@@ -63,6 +64,7 @@ enum PageSection: String, CaseIterable, Identifiable {
         case .taskbar: "dock.rectangle"
         case .quickCorner: "square.stack.3d.up"
         case .quickAccess: "hand.draw"
+        case .altTab: "rectangle.on.rectangle"
         case .explorer: "folder"
         }
     }
@@ -138,6 +140,7 @@ struct PageView: View {
                         case .taskbar: TaskbarSection()
                         case .quickCorner: QuickCornerSection()
                         case .quickAccess: QuickAccessSection()
+                        case .altTab: AltTabSection()
                         case .explorer: ExplorerSection()
                         case .features: FeaturesSection()
                         case .squiggle: SquiggleSection()
@@ -594,6 +597,35 @@ struct QuickCornerSection: View {
                     tile = nil; glyph = nil; curve = 1
                 }
             }
+        }
+    }
+}
+
+struct AltTabSection: View {
+    @State private var enabled: Bool = dockPrefs.value(AltTabSetting.enabled, default: true)
+    @State private var key: String = dockPrefs.value(AltTabSetting.key, default: "option")
+    @State private var size: String = dockPrefs.value(AltTabSetting.size, default: "medium")
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            PartOffBanner(part: .dock)
+            SettingsGroup(footer: "Like Windows 11: hold the key and tap Tab to see every window, most recently used first. Tab or ← → to move, Shift-Tab to go back, let go to switch. Esc cancels; you can also point at a window and click it.") {
+                ToggleRow(title: "Alt-Tab", detail: "Switch between windows, not just apps.",
+                          isOn: Binding(get: { enabled }, set: { enabled = $0; dockPrefs.set(AltTabSetting.enabled, $0) }))
+                RowDivider()
+                PickerRow(title: "Shortcut", detail: key == "command" ? "Replaces the Mac's own ⌘ Tab app switcher." : "⌥ Option is the Mac's Alt key.",
+                          selection: Binding(get: { key }, set: { key = $0; dockPrefs.set(AltTabSetting.key, $0) }),
+                          options: [("option", "⌥ Tab"), ("command", "⌘ Tab")])
+                .disabled(!enabled).opacity(enabled ? 1 : 0.45)
+            }
+            SettingsGroup {
+                PickerRow(title: "Preview size", selection: Binding(get: { size }, set: { size = $0; dockPrefs.set(AltTabSetting.size, $0) }),
+                          options: [("small", "Small"), ("medium", "Medium"), ("large", "Large")])
+                RowDivider()
+                ToggleRow(title: "Include minimized windows", detail: "And windows of hidden apps, after the open ones.",
+                          isOn: dockPrefs.binding(AltTabSetting.showMinimized, default: true))
+            }
+            .disabled(!enabled).opacity(enabled ? 1 : 0.45)
         }
     }
 }

@@ -3,6 +3,7 @@
 A Windows 11-style taskbar, File Explorer and screenshot tool for your Mac, in one app.
 
 - **Taskbar**: app buttons with live window previews (with play, pause and skip under Spotify and Music), Aero Peek, what's playing, and All apps. Size, alignment, background, colour, shape, all yours. Hides for full-screen apps and Mission Control.
+- **Alt-Tab**: hold ⌥ (or ⌘) and tap Tab for Windows 11-style window thumbnails, most recently used first; let go to switch.
 - **Quick Corner and Quick Access**: point at the bottom-right corner for a fan of shortcuts, or swipe two fingers in from the right edge of the trackpad (or press your own shortcut) for Quick Access. Each has its own list: apps, files, folders, your music app, browser, AI app, and Recent to flip between your last two apps.
 - **File Explorer**: tabs, breadcrumbs, Quick access, Details and icon views, and Save/Open dialogs from other apps. Folders open in it instead of Finder. Windows 11, Mica or Liquid Glass themes.
 - **Squiggle**: snip an area, a window or the screen (frozen the instant you press the key, menus and all), draw on it, or record the screen. Every shortcut can be changed.

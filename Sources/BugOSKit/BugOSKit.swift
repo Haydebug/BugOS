@@ -425,3 +425,15 @@ public enum BugOSColor {
         ("Graphite", "#8E8E93"),
     ]
 }
+
+/// Alt-Tab (Windows 11 style window switcher) settings, in the taskbar's preferences.
+public enum AltTabSetting {
+    /// On by default.
+    public static let enabled = "altTabEnabled"
+    /// "option" (default: ⌥ Tab) or "command" (⌘ Tab, instead of the Mac's app switcher).
+    public static let key = "altTabKey"
+    /// Minimized windows and hidden apps' windows too (default on).
+    public static let showMinimized = "altTabShowMinimized"
+    /// "small" | "medium" (default) | "large" thumbnails.
+    public static let size = "altTabSize"
+}

@@ -564,6 +564,9 @@ final class AppHistory {
         if order.count > 12 { order.removeLast() }
     }
 
+    /// Apps you've used, most recent first (for Alt-Tab's window order).
+    var recentPIDs: [pid_t] { order }
+
     /// The app before the one in front now (still running).
     var previous: NSRunningApplication? {
         let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
