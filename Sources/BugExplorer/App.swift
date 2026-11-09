@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return
         }
         NSApp.mainMenu = buildMenu()
+        Location.fallback = { AppDelegate.start }   // a reopened tab whose folder is gone: your start place
         Theme.applyAppearance()
         GlobalHotkey.onPress = { [weak self] in self?.hotkeyPressed() }
         GlobalHotkey.register()
@@ -47,7 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// Where new windows open (BugOS › File Explorer › Open new windows to).
     static var start: Location {
-        Location.from(token: UserDefaults.standard.string(forKey: ExplorerSetting.startLocation) ?? "home:")
+        let token = UserDefaults.standard.string(forKey: ExplorerSetting.startLocation) ?? "home:"
+        if token != "home:", token != "thismac:", !FS.exists(URL(fileURLWithPath: token)) { return .home }   // that folder's gone
+        return Location.from(token: token)
     }
 
     /// The first window of a session brings back the tabs you had open.
@@ -130,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     @objc func newWindowAction(_ sender: Any?) {
-        let loc = frontController?.current?.location ?? .home
+        let loc = frontController?.current?.location ?? Self.start   // ⌘N: the folder you're in, like Windows
         newWindow(locations: [loc])
     }
 

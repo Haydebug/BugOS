@@ -61,7 +61,7 @@ final class ExplorerWindowController: NSWindowController, NSWindowDelegate {
         strip.onLayout = { [weak self] in self?.positionTrafficLights() }
 
         for loc in locations { addTab(loc, select: false) }
-        if tabs.isEmpty { addTab(.home, select: false) }
+        if tabs.isEmpty { addTab(AppDelegate.start, select: false) }
         select(0)
         positionTrafficLights()
         applyTheme()
@@ -226,7 +226,8 @@ final class ExplorerWindowController: NSWindowController, NSWindowDelegate {
         return super.supplementalTarget(forAction: action, sender: sender)
     }
 
-    @objc func newTab(_ sender: Any?) { addTab(.home, select: true) }
+    /// New tabs open where new windows do (BugOS › File Explorer › Open new windows to).
+    @objc func newTab(_ sender: Any?) { addTab(AppDelegate.start, select: true) }
     @objc func closeTab(_ sender: Any?) { close(tab: selected) }
     @objc func nextTab(_ sender: Any?) { select((selected + 1) % tabs.count) }
     @objc func previousTab(_ sender: Any?) { select((selected - 1 + tabs.count) % tabs.count) }

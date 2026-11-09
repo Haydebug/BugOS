@@ -51,7 +51,16 @@ final class ShiftScroll {
             return Unmanaged.passUnretained(event)
         }, userInfo: nil)
         guard let tap else { return }
-        CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
+        // Its own thread: every scroll on the Mac passes through here, so it must never wait behind the
+        // taskbar's work on the main thread (that showed up as scroll stutter while the bar was busy).
+        let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
+        let thread = Thread {
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+            CFRunLoopRun()
+        }
+        thread.name = "BugOS scroll"
+        thread.qualityOfService = .userInteractive
+        thread.start()
         CGEvent.tapEnable(tap: tap, enable: true)
     }
 

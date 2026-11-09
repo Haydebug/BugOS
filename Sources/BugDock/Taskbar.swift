@@ -118,6 +118,7 @@ final class TaskbarController: ObservableObject {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshShown() }
         }
+        refreshTimer?.tolerance = 0.3
         // Every space, but hidden by Mission Control / Exposé (macOS does that for "transient" windows).
         panel.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
         let root = TaskbarView(tracker: tracker, bar: self, nowPlaying: self.nowPlaying, style: self)
@@ -203,16 +204,15 @@ final class TaskbarController: ObservableObject {
         fullScreenTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkFullScreen() }
         }
+        fullScreenTimer?.tolerance = 0.15   // lets macOS line its wakeups up with the other timers
     }
 
     private var frontIsFullScreen: Bool {
         guard UserDefaults.standard.object(forKey: FullScreenSetting.hideBar) as? Bool ?? true else { return false }
-        guard let front = NSWorkspace.shared.frontmostApplication,
-              front.processIdentifier != ProcessInfo.processInfo.processIdentifier,
-              let w = WindowReader.focusedWindow(pid: front.processIdentifier),
-              AX.bool(w, "AXFullScreen") == true else { return false }
+        let probe = FrontFullScreen.read()
+        guard probe.full else { return false }
         // Only if it's full screen on the bar's screen (AX frames are top-left based on the main screen).
-        guard let f = AX.frame(w) else { return true }
+        guard let f = probe.frame else { return true }
         let mainH = NSScreen.screens.first?.frame.height ?? 0
         let cocoa = CGRect(x: f.minX, y: mainH - f.maxY, width: f.width, height: f.height)
         return screen.frame.intersects(cocoa.insetBy(dx: 2, dy: 2))
@@ -586,5 +586,34 @@ struct BarBackground: View {
             }
         }
         .padding(style.floating ? EdgeInsets(top: 3, leading: 8, bottom: 5, trailing: 8) : EdgeInsets())
+    }
+}
+
+
+/// Is the app in front full screen, and where? Asked once for every bar (each extra display's bar checks
+/// every second too): one round trip for the focused window's full-screen flag, position and size,
+/// shared for a moment, instead of ~5 calls per bar.
+@MainActor
+enum FrontFullScreen {
+    private static var at = Date.distantPast
+    private static var last: (full: Bool, frame: CGRect?) = (false, nil)
+    private static let attrs = ["AXFullScreen", kAXPositionAttribute, kAXSizeAttribute] as CFArray
+
+    static func read() -> (full: Bool, frame: CGRect?) {
+        if Date().timeIntervalSince(at) < 0.2 { return last }
+        at = Date()
+        last = (false, nil)
+        guard let front = NSWorkspace.shared.frontmostApplication,
+              front.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let w = WindowReader.focusedWindow(pid: front.processIdentifier) else { return last }
+        var raw: CFArray?
+        guard AXUIElementCopyMultipleAttributeValues(w, attrs, AXCopyMultipleAttributeOptions(rawValue: 0), &raw) == .success,
+              let v = raw as? [AnyObject], v.count == 3, (v[0] as? NSNumber)?.boolValue == true else { return last }
+        var p = CGPoint.zero, s = CGSize.zero
+        let pv = v[1] as CFTypeRef, sv = v[2] as CFTypeRef
+        let ok = CFGetTypeID(pv) == AXValueGetTypeID() && CFGetTypeID(sv) == AXValueGetTypeID()
+            && AXValueGetValue(pv as! AXValue, .cgPoint, &p) && AXValueGetValue(sv as! AXValue, .cgSize, &s)
+        last = (true, ok ? CGRect(origin: p, size: s) : nil)
+        return last
     }
 }

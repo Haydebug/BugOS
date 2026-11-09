@@ -158,11 +158,56 @@ final class NavPane: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             if !r.isEmpty { r.append(NavNode(.separator, title: "")) }
             r += g.nodes
         }
-        // Keep "This Mac" open across reloads.
-        let wasExpanded = roots.first { $0.kind == .thisMac }.map { outline.isItemExpanded($0) } ?? true
         roots = r
         outline.reloadData()
-        if wasExpanded, on("thisMac") { outline.expandItem(mac) }
+        restoreExpanded()
+    }
+
+    // MARK: Remembering which arrows are open
+
+    /// Which rows you left expanded (This Mac, Network, folders…), kept across windows and restarts.
+    /// Never set before: just This Mac open, as it always was.
+    private static let expandedKey = "navExpanded"
+    private var restoringExpanded = false
+    private static var expanded: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: expandedKey) ?? ["thisMac"]) }
+        set { UserDefaults.standard.set(Array(newValue), forKey: expandedKey) }
+    }
+
+    /// A row's name for remembering it: This Mac / Network by kind, everything else by its folder.
+    private static func key(_ n: NavNode) -> String? {
+        switch n.kind {
+        case .thisMac: return "thisMac"
+        case .network: return "network"
+        case .separator, .home, .recycleBin: return nil
+        default: return n.url.map { "\(n.kind == .pinned ? "pin" : "dir"):\($0.standardizedFileURL.path)" }
+        }
+    }
+
+    /// Open again what was open (top level first, then inside those, a few levels down).
+    private func restoreExpanded() {
+        let want = Self.expanded
+        restoringExpanded = true
+        defer { restoringExpanded = false }
+        func walk(_ nodes: [NavNode], depth: Int) {
+            guard depth < 6 else { return }
+            for n in nodes where n.expandable {
+                guard let k = Self.key(n), want.contains(k) else { continue }
+                outline.expandItem(n)
+                walk(n.children ?? [], depth: depth + 1)
+            }
+        }
+        walk(roots, depth: 0)
+    }
+
+    func outlineViewItemDidExpand(_ n: Notification) { remember(n, open: true) }
+    func outlineViewItemDidCollapse(_ n: Notification) { remember(n, open: false) }
+
+    private func remember(_ n: Notification, open: Bool) {
+        guard !restoringExpanded, let node = n.userInfo?["NSObject"] as? NavNode, let k = Self.key(node) else { return }
+        var e = Self.expanded
+        if open { e.insert(k) } else { e.remove(k) }
+        Self.expanded = e
     }
 
     /// Highlight the row for the current location if it's a top-level place.

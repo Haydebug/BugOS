@@ -116,7 +116,7 @@ final class StartMenuModel: ObservableObject {
     func reload() {
         DispatchQueue.global(qos: .userInitiated).async {
             let list = AppCatalog.scan()
-            DispatchQueue.main.async { self.apps = list }
+            DispatchQueue.main.async { if list != self.apps { self.apps = list } }   // unchanged: no redraw mid-animation
         }
     }
 }
@@ -136,6 +136,9 @@ final class StartMenuController: NSObject, NSWindowDelegate {
         super.init()
         panel.hasShadow = true
         panel.delegate = self
+        // Know the apps before the first open (in the background, once things have settled after login),
+        // so the first All apps isn't empty for a moment. Every open still rescans, as before.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.model.reload() }
         let host = ClickThroughHostingView(rootView: StartMenuView(model: model, tracker: tracker, close: { [weak self] in self?.close() }))
         host.wantsLayer = true
         host.layer?.backgroundColor = .clear

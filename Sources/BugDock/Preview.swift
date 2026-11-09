@@ -41,8 +41,18 @@ final class PreviewController {
         } else {
             let work = DispatchWorkItem { [weak self] in self?.show(id, anchor) }
             showWork = work
+            prefetch(id)
             let delay = UserDefaults.standard.object(forKey: DockSetting.previewDelay) as? Double ?? 0.35
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+    }
+
+    /// Capture the app's thumbnails during the hover delay (they take ~50 ms: the window list, then the
+    /// capture), so the popup opens with fresh pictures in it instead of filling them in a moment later.
+    private func prefetch(_ id: String) {
+        guard Thumbnails.shared.hasPermission, let g = tracker.groups.first(where: { $0.id == id }) else { return }
+        for w in g.windows where !w.isMinimized {
+            Task { _ = await Thumbnails.shared.capture(w) }
         }
     }
 

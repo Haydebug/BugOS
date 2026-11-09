@@ -54,11 +54,14 @@ enum Location: Equatable {
         case .folder(let u), .search(let u, _): return u.path
         }
     }
+    /// Where to go when a saved place is gone (the app sets it to your "Open new windows to" place).
+    static var fallback: () -> Location = { .home }
+
     static func from(token: String) -> Location {
         if token == "home:" { return .home }
         if token == "thismac:" { return .thisMac }
         let u = URL(fileURLWithPath: token)
-        return FS.exists(u) ? .folder(u) : .home
+        return FS.exists(u) ? .folder(u) : fallback()
     }
 }
 

@@ -53,9 +53,11 @@ final class ClipboardHistory: ObservableObject {
             if timer == nil {
                 loadPinned()
                 lastCount = NSPasteboard.general.changeCount
+                // Twice a second, as before (and the popup also checks the moment it opens).
                 timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
                     MainActor.assumeIsolated { ClipboardHistory.shared.check() }
                 }
+                timer?.tolerance = 0.05
             }
             trim()
         } else {
@@ -64,7 +66,7 @@ final class ClipboardHistory: ObservableObject {
         }
     }
 
-    private func check() {
+    func check() {
         let pb = NSPasteboard.general
         guard pb.changeCount != lastCount else { return }
         lastCount = pb.changeCount
@@ -218,6 +220,7 @@ final class ClipboardPanel {
     func toggle() { isOpen ? close() : open() }
 
     func open() {
+        ClipboardHistory.shared.check()   // whatever was copied in the last second
         returnTo = NSWorkspace.shared.frontmostApplication
         model.selected = ClipboardHistory.shared.items.first?.id
         panel.contentView = ClickThroughHostingView(rootView: ClipPanelView(history: ClipboardHistory.shared, model: model,

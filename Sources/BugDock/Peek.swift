@@ -28,6 +28,9 @@ final class PeekController {
     private var showWork: DispatchWorkItem?
     private var endWork: DispatchWorkItem?
     private var loop: Task<Void, Never>?
+    /// The first full-size capture, started during the hover delay so the peek fades in the moment the
+    /// delay ends instead of ~50–80 ms after it.
+    private var early: (id: String, task: Task<(image: CGImage, frame: CGRect)?, Never>)?
     private var generation = 0
     private var wallpaperKey: String?
 
@@ -77,6 +80,8 @@ final class PeekController {
         }
         let work = DispatchWorkItem { [weak self] in self?.start(w) }
         showWork = work
+        let scale = screen(for: w).backingScaleFactor
+        if early?.id != w.id { early = (w.id, Task { await Thumbnails.shared.captureFull(w, scale: scale) }) }
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.hoverDelay, execute: work)
     }
 
@@ -96,6 +101,7 @@ final class PeekController {
         endWork?.cancel()
         loop?.cancel()
         loop = nil
+        early = nil
         pendingID = nil
         guard currentID != nil else { return }
         currentID = nil
@@ -128,10 +134,15 @@ final class PeekController {
         if switching { setWindowImage(nil, frame: .zero) }   // don't show the previous window while the new one loads
 
         let scale = screen.backingScaleFactor
+        let head = early?.id == w.id ? early?.task : nil
+        early = nil
         loop = Task { [weak self] in
             var shown = false
+            var first = head
             while !Task.isCancelled {
-                let result = await Thumbnails.shared.captureFull(w, scale: scale)
+                let result: (image: CGImage, frame: CGRect)?
+                if let f = first { result = await f.value; first = nil }   // usually already done
+                else { result = await Thumbnails.shared.captureFull(w, scale: scale) }
                 guard let self, !Task.isCancelled, self.generation == gen else { return }
                 if let result {
                     self.setWindowImage(result.image, frame: result.frame)

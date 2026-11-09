@@ -77,6 +77,10 @@ struct TrackedWindow: Identifiable, Equatable {
     let pid: pid_t
     let title: String
     let isMinimized: Bool
+    /// Where it was when last read (top-left global, like AX), and whether it was full screen. Not part of ==:
+    /// moving a window doesn't change its button.
+    var frame: CGRect? = nil
+    var fullScreen = false
 
     var id: String { "\(pid)-\(CFHash(element))" }
 
@@ -94,31 +98,49 @@ enum WindowReader {
         let all = windows(pid: pid)
         if appHidden { return all }
         let visible = all.enumerated().compactMap { i, w -> (Int, CGRect)? in
-            guard !w.isMinimized, let f = AX.frame(w.element) else { return nil }
+            guard !w.isMinimized, let f = w.frame else { return nil }
             return (i, f)
         }
         let matched = WindowMatch.assign(ax: visible.map { ($0.1, all[$0.0].title) }, cg: onScreen)
         var keep = Set(matched.keys.map { visible[$0].0 })
-        for (i, w) in all.enumerated() where w.isMinimized || AX.frame(w.element) == nil { keep.insert(i) }
+        for (i, w) in all.enumerated() where w.isMinimized || w.frame == nil { keep.insert(i) }
         // Full-screen windows live on their own desktop, so they're never "on screen" from anywhere else;
         // keep them, or the app drops off the taskbar whenever you're not in it (Roblox, games, videos).
-        for (i, w) in all.enumerated() where AX.bool(w.element, "AXFullScreen") == true { keep.insert(i) }
+        for (i, w) in all.enumerated() where w.fullScreen { keep.insert(i) }
         return all.enumerated().filter { keep.contains($0.offset) }.map(\.element)
     }
+
+    /// What the taskbar reads from each window, asked for in ONE round trip to the app
+    /// (AXUIElementCopyMultipleAttributeValues) instead of one per attribute (it was ~10 per window).
+    private static let attrs = [kAXRoleAttribute, kAXSubroleAttribute, kAXSizeAttribute, kAXPositionAttribute,
+                                kAXTitleAttribute, kAXMinimizedAttribute, "AXFullScreen"] as CFArray
 
     /// Every standard window AX reports for a process (may include other Spaces).
     static func windows(pid: pid_t) -> [TrackedWindow] {
         let app = AX.app(pid)
         return AX.elements(app, kAXWindowsAttribute).compactMap { w in
-            guard AX.string(w, kAXRoleAttribute) == kAXWindowRole else { return nil }
-            let sub = AX.string(w, kAXSubroleAttribute)
+            var raw: CFArray?
+            guard AXUIElementCopyMultipleAttributeValues(w, attrs, AXCopyMultipleAttributeOptions(rawValue: 0), &raw) == .success,
+                  let v = raw as? [AnyObject], v.count == 7 else { return nil }
+            func ax<T>(_ i: Int, _ type: AXValueType, _ empty: T) -> T? {
+                let o = v[i] as CFTypeRef
+                guard CFGetTypeID(o) == AXValueGetTypeID(), AXValueGetType(o as! AXValue) == type else { return nil }
+                var out = empty
+                return AXValueGetValue(o as! AXValue, type, &out) ? out : nil
+            }
+            guard v[0] as? String == kAXWindowRole else { return nil }
+            let sub = v[1] as? String
             guard sub == kAXStandardWindowSubrole || sub == kAXDialogSubrole else { return nil }
-            if let s = AX.size(w), s.width < 60 || s.height < 40 { return nil }
+            let size = ax(2, .cgSize, CGSize.zero)
+            if let s = size, s.width < 60 || s.height < 40 { return nil }
+            let pos = ax(3, .cgPoint, CGPoint.zero)
             return TrackedWindow(
                 element: w,
                 pid: pid,
-                title: AX.string(w, kAXTitleAttribute) ?? "",
-                isMinimized: AX.bool(w, kAXMinimizedAttribute) ?? false
+                title: v[4] as? String ?? "",
+                isMinimized: (v[5] as? NSNumber)?.boolValue ?? false,
+                frame: size.flatMap { s in pos.map { CGRect(origin: $0, size: s) } },
+                fullScreen: (v[6] as? NSNumber)?.boolValue ?? false
             )
         }
     }

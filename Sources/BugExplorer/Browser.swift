@@ -94,6 +94,9 @@ final class BrowserViewController: NSViewController, FileListDelegate, NSMenuIte
 
         split.addArrangedSubview(navPane)
         split.addArrangedSubview(contentHost)
+        // Resizing the window stretches the file list, not the panes beside it (like Windows).
+        split.setHoldingPriority(NSLayoutConstraint.Priority(260), forSubviewAt: 0)
+        split.setHoldingPriority(NSLayoutConstraint.Priority(240), forSubviewAt: 1)
         navPane.widthAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
         contentHost.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
         detailsPane.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
@@ -127,9 +130,6 @@ final class BrowserViewController: NSViewController, FileListDelegate, NSMenuIte
         NotificationCenter.default.addObserver(self, selector: #selector(settingsChanged), name: .settingsChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(updateCommands), name: .clipboardChanged, object: nil)
         applyPaneSettings()
-        DispatchQueue.main.async { [self] in
-            split.setPosition(CGFloat(UserDefaults.standard.double(forKey: "navWidth").nonZero ?? 250), ofDividerAt: 0)
-        }
         navigate(location, record: false)
     }
 
@@ -171,8 +171,9 @@ final class BrowserViewController: NSViewController, FileListDelegate, NSMenuIte
         }
         if let wanted, wanted.superview !== split {
             split.addArrangedSubview(wanted)
-            let w = UserDefaults.standard.double(forKey: "sidePaneWidth").nonZero ?? 300
-            DispatchQueue.main.async { [self] in split.setPosition(split.bounds.width - CGFloat(w) - split.dividerThickness, ofDividerAt: 1) }
+            split.setHoldingPriority(NSLayoutConstraint.Priority(260), forSubviewAt: split.arrangedSubviews.count - 1)
+            // Laid out already (turned on from the toolbar): put it at your width now; otherwise once it is.
+            if widthsRestored { DispatchQueue.main.async { [self] in placeSidePane() } }
         }
         split.adjustSubviews()
         detailsToggle?.isToggled = s.sidePane == .details
@@ -181,8 +182,39 @@ final class BrowserViewController: NSViewController, FileListDelegate, NSMenuIte
     }
 
     func splitView(_ sv: NSSplitView, canCollapseSubview v: NSView) -> Bool { false }
+
+    /// Your pane widths (BugExplorer remembers them across windows and restarts): saved only when you drag a
+    /// divider (macOS tags those resizes), never from a window being laid out or resized, which used to
+    /// overwrite them; and put back once the window has its real size.
+    private var widthsRestored = false
+    private var restoring = false
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard !widthsRestored, split.bounds.width > 400 else { return }
+        widthsRestored = true
+        // Just after this layout pass (a divider set during one doesn't stick).
+        DispatchQueue.main.async { [self] in
+            restoring = true
+            let want = CGFloat(UserDefaults.standard.double(forKey: "navWidth").nonZero ?? 250)
+            split.setPosition(want, ofDividerAt: 0)
+            split.layoutSubtreeIfNeeded()
+            placeSidePane()
+            split.layoutSubtreeIfNeeded()
+            restoring = false
+        }
+    }
+
+    private func placeSidePane() {
+        guard [detailsPane, previewPane].contains(where: { ($0 as NSView).superview === split }) else { return }
+        let w = CGFloat(UserDefaults.standard.double(forKey: "sidePaneWidth").nonZero ?? 300)
+        split.setPosition(split.bounds.width - w - split.dividerThickness, ofDividerAt: split.arrangedSubviews.count - 2)
+    }
+
     func splitViewDidResizeSubviews(_ n: Notification) {
-        guard view.window != nil else { return }
+        // A real drag: a divider moved while the mouse button is down (our own restore is a divider move too).
+        guard view.window != nil, widthsRestored, !restoring, n.userInfo?["NSSplitViewDividerIndex"] != nil,
+              NSEvent.pressedMouseButtons & 1 != 0 else { return }
         if !navPane.isHidden, navPane.frame.width > 100 { UserDefaults.standard.set(Double(navPane.frame.width), forKey: "navWidth") }
         for p in [detailsPane, previewPane] as [NSView] where p.superview === split && p.frame.width > 100 {
             UserDefaults.standard.set(Double(p.frame.width), forKey: "sidePaneWidth")

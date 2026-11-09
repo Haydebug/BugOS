@@ -45,7 +45,7 @@ final class Thumbnails {
         // was listed but could never be captured or peeked.
         let axWins: [(element: AXUIElement, frame: CGRect, title: String)] =
             WindowReader.windows(pid: pid).compactMap { w in
-                guard !w.isMinimized, let f = AX.frame(w.element) else { return nil }
+                guard !w.isMinimized, let f = w.frame else { return nil }   // just read, in the same batch
                 return (w.element, f, w.title)
             }
         let cg = WindowMatch.onScreenWindows()[pid] ?? []

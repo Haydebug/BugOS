@@ -208,15 +208,17 @@ final class WindowTracker: ObservableObject {
                 }
             }
         }
-        // Safety net for anything the AX notifications miss (e.g. a closed window).
+        // Safety net for anything the AX notifications miss (e.g. a closed window). Skipped when a refresh
+        // ran in the last second anyway (they come with every app switch, window and title change).
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 let t = AX.isTrusted
                 if t != self.axTrusted { self.axTrusted = t }
-                self.scheduleRefresh()
+                if Date().timeIntervalSince(self.lastRefresh) >= 0.9 { self.scheduleRefresh() }
             }
         }
+        timer?.tolerance = 0.2
         scheduleRefresh()
     }
 
@@ -275,9 +277,26 @@ final class WindowTracker: ObservableObject {
         h.seekToEndOfFile(); h.write(Data("\(Date()) Taskbar \(s)\n".utf8)); try? h.close()
     }
 
+    /// When the last refresh started (the safety net skips a beat after one).
+    private var lastRefresh = Date.distantPast
+    private var coalescing = false
+
+    /// From AX notifications, which come in bursts (a page loading changes Chrome's title several times, a
+    /// new window sends created + focused + main changed): one refresh for the burst, a frame later.
+    func refreshCoalesced() {
+        guard !coalescing else { return }
+        coalescing = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
+            guard let self else { return }
+            self.coalescing = false
+            self.scheduleRefresh()
+        }
+    }
+
     func scheduleRefresh() {
         if inFlight { pending = true; return }
         inFlight = true
+        lastRefresh = Date()
         let desktopAtStart = Desktop.current
         let startedAt = Date()
         let allDesktops = Self.allDesktops
@@ -514,5 +533,5 @@ final class WindowTracker: ObservableObject {
 private let axCallback: AXObserverCallback = { _, _, _, refcon in
     guard let refcon else { return }
     let tracker = Unmanaged<WindowTracker>.fromOpaque(refcon).takeUnretainedValue()
-    MainActor.assumeIsolated { tracker.scheduleRefresh() }
+    MainActor.assumeIsolated { tracker.refreshCoalesced() }
 }

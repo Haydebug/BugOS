@@ -89,9 +89,21 @@ final class NowPlaying: ObservableObject {
     func isPlaying(_ bundleID: String) -> Bool { info?.bundleID == bundleID && isPlaying }
 
     init() {
-        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.poll() }
+        // Spotify and Music announce every play, pause, skip and track change: read them then (instantly),
+        // and every 2 s while something plays (keeps the progress bar exact, as before). With nothing playing
+        // there's nothing to correct, so then only every 10 s.
+        for name in ["com.spotify.client.PlaybackStateChanged", "com.apple.Music.playerInfo", "com.apple.iTunes.playerInfo"] {
+            DistributedNotificationCenter.default().addObserver(forName: Notification.Name(name), object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.poll() }
+            }
         }
+        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if self.isPlaying || Date().timeIntervalSince(self.lastPoll) >= 10 { self.poll() }
+            }
+        }
+        timer?.tolerance = 0.2
         let nc = NSWorkspace.shared.notificationCenter
         for n in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             nc.addObserver(forName: n, object: nil, queue: .main) { [weak self] _ in
@@ -153,8 +165,11 @@ final class NowPlaying: ObservableObject {
     /// The BugOS page's "Show music on the taskbar" switch (on unless turned off).
     static var enabled: Bool { UserDefaults.standard.object(forKey: "showNowPlaying") as? Bool ?? true }
 
+    private var lastPoll = Date.distantPast
+
     func poll() {
         guard !inFlight else { return }
+        lastPoll = Date()
         guard Self.enabled else { setInfo(nil); progress = nil; return }   // off: no widget, no player polling
         let running = Self.players.filter { !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
         guard !running.isEmpty else { setInfo(nil); progress = nil; return }
@@ -325,6 +340,7 @@ enum PlayerScripts {
 /// Album art + title/artist on the left of the bar. Hidden when nothing is playing.
 struct NowPlayingWidget: View {
     @ObservedObject var model: NowPlaying
+    static func tick(_ p: PlaybackProgress?) -> Double { min(1, max(0.2, (p?.duration ?? 0) / 320)) }
     @ObservedObject private var auth = SpotifyAuth.shared
     @State private var hovering = false
 
@@ -338,8 +354,8 @@ struct NowPlayingWidget: View {
                             .frame(width: 32, height: 32)
                             .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                             .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
-                        TimelineView(.periodic(from: .now, by: 0.2)) { ctx in
-                            let p = model.progress
+                        let p = model.progress
+                        VStack(alignment: .leading, spacing: 0) {
                             VStack(alignment: .leading, spacing: 0) {
                                 Text(info.title)
                                     .font(.system(size: 12, weight: .semibold))
@@ -347,14 +363,20 @@ struct NowPlayingWidget: View {
                                 Text(info.artist)
                                     .font(.system(size: 11))
                                     .foregroundStyle(.white.opacity(0.72))
-                                ProgressLine(fraction: p?.fraction(at: ctx.date) ?? 0)
-                                    .opacity(p?.duration ?? 0 > 0 ? 1 : 0)
-                                    .padding(.top, 3)
                             }
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                            .shadow(color: .black.opacity(0.55), radius: 2, y: 1)   // (per row: the rows don't overlap, so it's the same look)
+                            // Only the line ticks (it used to redraw the title, artist and their shadows 5×
+                            // a second), only while playing, and as often as it moves a pixel (≈ duration /
+                            // 320 for a ~160 pt line at 2×), so it looks exactly the same.
+                            TimelineView(.animation(minimumInterval: Self.tick(p), paused: !(p?.playing ?? false))) { ctx in
+                                ProgressLine(fraction: p?.fraction(at: ctx.date) ?? 0)
+                            }
                             .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
+                            .opacity(p?.duration ?? 0 > 0 ? 1 : 0)
+                            .padding(.top, 3)
                         }
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                     }
                     .contentShape(Rectangle())
                 }
