@@ -141,6 +141,26 @@ enum WindowActions {
         app?.activate()
     }
 
+    /// Open a new window of a running app on this desktop by pressing its own "New Window" menu item (File ›
+    /// New Window, New Finder Window…; not private/incognito ones). False if it has none.
+    @discardableResult
+    static func newWindowHere(pid: pid_t) -> Bool {
+        let app = AX.app(pid)
+        AXUIElementSetMessagingTimeout(app, 0.3)
+        guard let bar = AX.element(app, kAXMenuBarAttribute) else { return false }
+        for top in AX.elements(bar, kAXChildrenAttribute) {
+            for menu in AX.elements(top, kAXChildrenAttribute) {
+                for item in AX.elements(menu, kAXChildrenAttribute) {
+                    guard let t = AX.string(item, kAXTitleAttribute), t.hasPrefix("New"), t.contains("Window"),
+                          !t.localizedCaseInsensitiveContains("private"), !t.localizedCaseInsensitiveContains("incognito"),
+                          AX.bool(item, kAXEnabledAttribute) != false else { continue }
+                    return AX.perform(item, kAXPressAction)
+                }
+            }
+        }
+        return false
+    }
+
     static func minimize(_ w: TrackedWindow) {
         AX.set(w.element, kAXMinimizedAttribute, true)
     }

@@ -73,7 +73,12 @@ final class TaskbarController: ObservableObject {
                 // Commands are for the main bar; every bar picks up new settings.
                 if command != nil, self?.isPrimary != true { return }
                 switch command {
-                case "pause": QuickAccessHotkey.unregister(); return   // the page is recording a shortcut
+                case "pause": QuickAccessHotkey.unregister(); ClipboardPanel.shared.pauseShortcut(); return   // the page is recording a shortcut
+                case "clipboard:clear": ClipboardHistory.shared.clear(); return
+                case "clipboard:log": ClipboardHistory.shared.logSummary(); return
+                case "clipboard:open": if !ClipboardPanel.shared.isOpen { ClipboardPanel.shared.open() }; return
+                case "clipboard:close": ClipboardPanel.shared.close(handBack: false); return
+                case let c? where c.hasPrefix("snap:"): Snapper.shared.key(UInt32(c.dropFirst(5)) ?? 0); return
                 case "spotify:connect": SpotifyAuth.shared.connect(); return
                 case "spotify:disconnect": SpotifyAuth.shared.disconnect(); return
                 case "allapps": self?.startMenu.open(); return
@@ -85,6 +90,8 @@ final class TaskbarController: ObservableObject {
                 if self?.isPrimary == true {
                     QuickAccessHotkey.reload()
                     ShiftScroll.shared.reload()
+                    Snapper.shared.reload()
+                    ClipboardPanel.shared.reload()
                     self?.altTab.reload()
                     self?.tracker.reloadSettings()
                     TaskbarSet.shared?.sync()
@@ -100,6 +107,9 @@ final class TaskbarController: ObservableObject {
             QuickAccessHotkey.reload()
             _ = altTab   // Alt-Tab listens from the start
             ShiftScroll.shared.reload()
+            Snapper.shared.tracker = tracker
+            Snapper.shared.reload()
+            ClipboardPanel.shared.reload()
         }
         groupsSub = tracker.$groups.receive(on: RunLoop.main).sink { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshShown() }
@@ -114,10 +124,10 @@ final class TaskbarController: ObservableObject {
         let host = BarHostingView(rootView: root)
         host.bar = self
         panel.contentView = host
-        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.layout() }
-        }
+        })
     }
 
     /// The screen this bar sits on: the menu-bar screen, or an extra bar's own screen.
@@ -130,6 +140,7 @@ final class TaskbarController: ObservableObject {
     /// open": an app shows on the bars of the screens its windows are on, and pinned or windowless apps on
     /// the main bar only (like Windows).
     func refreshShown() {
+        guard !retired else { return }
         let groups = tracker.groups
         let mode = UserDefaults.standard.string(forKey: DockSetting.barAppsOn) ?? "all"
         let new: [AppGroup]
@@ -146,16 +157,25 @@ final class TaskbarController: ObservableObject {
         if new.map(\.id) != shownGroups.map(\.id) || new != shownGroups { shownGroups = new }
     }
 
-    /// An extra bar going away (its screen was unplugged, or the setting turned off).
+    /// An extra bar going away (its screen was unplugged, or the setting turned off). It must never come
+    /// back: its view keeps it alive, and its full-screen and screen-change handlers would otherwise show it
+    /// again on the main screen, on top of the real bar (every app looked doubled).
+    private(set) var retired = false
     func tearDown() {
+        retired = true
         refreshTimer?.invalidate()
         fullScreenTimer?.invalidate()
         groupsSub = nil
+        for o in observers { NotificationCenter.default.removeObserver(o); NSWorkspace.shared.notificationCenter.removeObserver(o) }
+        observers = []
         preview.hide()
         panel.orderOut(nil)
+        panel.contentView = nil   // drops the view, and with it the reference that kept this bar alive
     }
+    private var observers: [NSObjectProtocol] = []
 
     func show() {
+        guard !retired else { return }
         layout()
         panel.orderFrontRegardless()
         watchFullScreen()
@@ -171,13 +191,13 @@ final class TaskbarController: ObservableObject {
     private func watchFullScreen() {
         let nc = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
-            nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            observers.append(nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.checkFullScreen()
                     // A space switch finishes animating a moment later.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self?.checkFullScreen() }
                 }
-            }
+            })
         }
         // Also catches an app going full screen without switching apps (the green button, a video).
         fullScreenTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -186,6 +206,7 @@ final class TaskbarController: ObservableObject {
     }
 
     private var frontIsFullScreen: Bool {
+        guard UserDefaults.standard.object(forKey: FullScreenSetting.hideBar) as? Bool ?? true else { return false }
         guard let front = NSWorkspace.shared.frontmostApplication,
               front.processIdentifier != ProcessInfo.processInfo.processIdentifier,
               let w = WindowReader.focusedWindow(pid: front.processIdentifier),
@@ -198,6 +219,7 @@ final class TaskbarController: ObservableObject {
     }
 
     func checkFullScreen() {
+        guard !retired else { return }
         let full = frontIsFullScreen
         guard full != hiddenForFullScreen else { return }
         hiddenForFullScreen = full
@@ -213,6 +235,9 @@ final class TaskbarController: ObservableObject {
     }
 
     func layout() {
+        guard !retired else { return }
+        // An extra bar whose screen is gone never falls back onto the main screen.
+        if displayID != nil, !NSScreen.screens.contains(where: { ScreenID.of($0) == displayID }) { panel.orderOut(nil); return }
         let f = screen.frame
         panel.setFrame(NSRect(x: f.minX, y: f.minY, width: f.width, height: Metrics.barHeight), display: true)
         if isPrimary { quickCorner.layout() }
@@ -258,7 +283,21 @@ final class TaskbarController: ObservableObject {
             m.addItem(.separator())
         }
         if let url = g.bundleURL {
-            m.addItem(MenuAction(g.isRunning ? "Open new window" : "Open \(g.name)") { WindowActions.open(url) })
+            m.addItem(MenuAction(g.isRunning ? "Open new window" : "Open \(g.name)") {
+                // Running: a new window here, from the app's own File › New Window (just "opening" it again does
+                // nothing for an app that already has windows on another desktop). Not running: open it.
+                if g.isRunning, let pid = g.pids.first {
+                    // Make the window first, then bring the app forward: with a window here macOS stays put.
+                    if WindowActions.newWindowHere(pid: pid) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { NSRunningApplication(processIdentifier: pid)?.activate() }
+                    } else {
+                        WindowActions.open(url)
+                    }
+                    tracker.refreshSoon()
+                } else {
+                    WindowActions.open(url)
+                }
+            })
             if g.isRunning { m.addItem(MenuAction("Open new instance") { WindowActions.newInstance(url) }) }
         }
         if g.canPin {

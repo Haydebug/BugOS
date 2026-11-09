@@ -5,6 +5,11 @@
 //             wheel zooms, like Roblox).
 // CoreGraphics shows a scroll as sideways while Shift is on the event, so both modes start by taking Shift
 // off the scroll event (the app still knows Shift is down from the keyboard).
+//
+// Also the mouse wheel (BugOS › Mouse › Mouse wheel; default 3 lines per notch, like Windows and like
+// LinearMouse's "3 lines, no acceleration"): each notch of a real mouse wheel scrolls exactly that many lines,
+// without the Mac's scroll acceleration. Trackpads (and Magic Mouse) are left alone: their scrolls carry
+// gesture phases, a wheel's don't.
 import AppKit
 import BugOSKit
 
@@ -19,12 +24,16 @@ final class ShiftScroll {
         if let m = d.string(forKey: MiscSetting.shiftScrollMode) { return m }
         return d.bool(forKey: MiscSetting.shiftScroll) ? "sideways" : "default"
     }
-    static var enabled: Bool { mode != "default" }
+    /// Lines per mouse-wheel notch (0 = the Mac's own scrolling). Default 3.
+    static var wheelLines: Int { UserDefaults.standard.object(forKey: MouseSetting.wheelLines) as? Int ?? 3 }
+    static var enabled: Bool { mode != "default" || wheelLines > 0 }
     nonisolated(unsafe) static var currentMode = "default"
+    nonisolated(unsafe) static var currentLines = 3
 
     /// Follow the setting.
     func reload() {
         Self.currentMode = Self.mode
+        Self.currentLines = Self.wheelLines
         if Self.enabled { start() } else if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
     }
 
@@ -38,6 +47,7 @@ final class ShiftScroll {
                 return Unmanaged.passUnretained(event)
             }
             ShiftScroll.apply(ShiftScroll.currentMode, to: event)
+            ShiftScroll.fixWheel(ShiftScroll.currentLines, event)
             return Unmanaged.passUnretained(event)
         }, userInfo: nil)
         guard let tap else { return }
@@ -46,6 +56,22 @@ final class ShiftScroll {
     }
 
     private func reenable() { if let tap, Self.enabled { CGEvent.tapEnable(tap: tap, enable: true) } }
+
+    /// A real mouse wheel's notch: exactly `lines` lines, no acceleration (LinearMouse's approach). Only
+    /// up/down (a sideways scroll, e.g. from Shift, is left as it is).
+    nonisolated static func fixWheel(_ lines: Int, _ e: CGEvent) {
+        guard lines > 0,
+              e.getIntegerValueField(.scrollWheelEventScrollPhase) == 0,
+              e.getIntegerValueField(.scrollWheelEventMomentumPhase) == 0,
+              e.getIntegerValueField(.scrollWheelEventDeltaAxis2) == 0 else { return }
+        let continuous = e.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
+        let line = e.getIntegerValueField(.scrollWheelEventDeltaAxis1)
+        let point = e.getDoubleValueField(.scrollWheelEventPointDeltaAxis1)
+        let sign: Int64 = continuous ? (point > 0 ? 1 : point < 0 ? -1 : 0) : line.signum()
+        guard sign != 0 else { return }
+        e.setIntegerValueField(.scrollWheelEventIsContinuous, value: 0)
+        e.setIntegerValueField(.scrollWheelEventDeltaAxis1, value: sign * Int64(lines))
+    }
 
     /// Shift held on a scroll: take it off (that alone makes it up/down again), then for "sideways" turn
     /// an up/down scroll into left/right.

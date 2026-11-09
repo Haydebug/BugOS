@@ -73,6 +73,13 @@ final class PinStore {
     }
 }
 
+/// The desktop (Space) you're on, as a number (private CoreGraphics call, as window managers use).
+@_silgen_name("CGSMainConnectionID") nonisolated private func CGSMainConnectionID() -> Int32
+@_silgen_name("CGSGetActiveSpace") nonisolated private func CGSGetActiveSpace(_ cid: Int32) -> Int
+enum Desktop {
+    nonisolated static var current: Int { CGSGetActiveSpace(CGSMainConnectionID()) }
+}
+
 @MainActor
 final class IconCache: ObservableObject {
     static let shared = IconCache()
@@ -157,6 +164,8 @@ final class WindowTracker: ObservableObject {
     func reloadSettings() {
         let v = UserDefaults.standard.bool(forKey: "showWindowlessApps")
         if v != showWindowlessApps { showWindowlessApps = v }
+        perDesktop.removeAll()   // e.g. "Show apps from" changed: what each desktop showed no longer holds
+        scheduleRefresh()
     }
 
     /// Windows-style default: only apps that actually have a window (plus pins).
@@ -190,10 +199,11 @@ final class WindowTracker: ObservableObject {
         for n in names {
             nc.addObserver(forName: n, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.scheduleRefresh()
-                    // The window list can lag the Space-switch animation; settle once it's done.
+                    guard let self else { return }
                     if n == NSWorkspace.activeSpaceDidChangeNotification {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self?.scheduleRefresh() }
+                        self.desktopChanged(via: "macOS signal")
+                    } else {
+                        self.scheduleRefresh()
                     }
                 }
             }
@@ -214,33 +224,98 @@ final class WindowTracker: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.scheduleRefresh() }
     }
 
+    // MARK: Switching desktops
+
+    /// Each desktop's last-known apps, so the bar shows them the moment you switch (no blank bar while
+    /// macOS animates), then confirms once the animation is over.
+    private var perDesktop: [Int: [AppGroup]] = [:]
+    /// Readings taken before this moment come from mid-animation (the new desktop's windows aren't
+    /// reported yet) and are thrown away.
+    private var settleUntil = Date.distantPast
+
+    /// The desktop the bar is showing. (macOS reports a switch only once its animation has finished, and
+    /// the desktop ID changes no earlier, measured 2026-11-09; so the signal is all there is to go on.)
+    private var shownDesktop = Desktop.current
+
+    private func desktopChanged(via source: String) {
+        let d = Desktop.current
+        shownDesktop = d
+        // All desktops: the bar doesn't change when you switch, so there's nothing to swap.
+        if !Self.allDesktops, let known = perDesktop[d], known != groups { groups = known }
+        settleUntil = Date().addingTimeInterval(0.25)
+        for delay in [0.26, 0.6] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.scheduleRefresh() }
+        }
+    }
+
+    /// Show apps from: all desktops (like the Mac Dock; nothing changes when you switch) or only this one
+    /// (like Windows' default). Default: this desktop.
+    static var allDesktops: Bool { UserDefaults.standard.string(forKey: DockSetting.appsFromDesktops) == "all" }
+
+    /// Apps that only run one copy (a second launch goes to the running one), so they can't open on this
+    /// desktop: they stay on every desktop's bar while they have a window anywhere, and a click takes you to it.
+    /// Some are known; the rest are learned the first time a click ends up going to their window.
+    static let knownOneCopy: Set<String> = [
+        "com.hnc.Discord", "com.spotify.client", "com.tinyspeck.slackmacgap", "com.microsoft.teams2", "us.zoom.xos",
+        "net.whatsapp.WhatsApp", "ru.keepcoder.Telegram", "com.facebook.archon", "com.valvesoftware.steam",
+    ]
+    static var oneCopy: Set<String> {
+        let learned = UserDefaults.standard.stringArray(forKey: "oneCopyApps") ?? []
+        return knownOneCopy.union(learned)
+    }
+    static func learnOneCopy(_ id: String) {
+        guard !oneCopy.contains(id) else { return }
+        UserDefaults.standard.set((UserDefaults.standard.stringArray(forKey: "oneCopyApps") ?? []) + [id], forKey: "oneCopyApps")
+        log("learned: \(id) runs one copy")
+    }
+
+    static func log(_ s: String) {
+        let url = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Logs/Bug OS.log")
+        guard let h = try? FileHandle(forWritingTo: url) else { return }
+        h.seekToEndOfFile(); h.write(Data("\(Date()) Taskbar \(s)\n".utf8)); try? h.close()
+    }
+
     func scheduleRefresh() {
         if inFlight { pending = true; return }
         inFlight = true
+        let desktopAtStart = Desktop.current
+        let startedAt = Date()
+        let allDesktops = Self.allDesktops
 
         let me = getpid()
         let apps = NSWorkspace.shared.runningApplications.filter {
             $0.activationPolicy == .regular && $0.processIdentifier != me && !$0.isTerminated
         }
         let pids = apps.map(\.processIdentifier)
+        let oneCopy = Self.oneCopy
+        let oneCopyPids = Set(apps.filter { $0.bundleIdentifier.map(oneCopy.contains) ?? false }.map(\.processIdentifier))
         let hidden = Set(apps.filter(\.isHidden).map(\.processIdentifier))
         let trusted = AX.isTrusted
         if trusted { syncObservers(pids); fitter.sync(pids) }
 
         axQueue.async { [weak self] in
             var byPid: [pid_t: [TrackedWindow]] = [:]
-            var elsewhere = Set<pid_t>()
+            var elsewhere = Set<pid_t>(), fullScreenElsewhere = Set<pid_t>()
             if trusted {
                 let onScreen = WindowMatch.onScreenWindows()   // current desktop only; one call for all apps
                 for pid in pids {
-                    byPid[pid] = WindowReader.windows(pid: pid, onScreen: onScreen[pid] ?? [], appHidden: hidden.contains(pid))
+                    // All desktops (BugOS › Taskbar): every window the app has, wherever it is.
+                    byPid[pid] = allDesktops ? WindowReader.windows(pid: pid)
+                        : WindowReader.windows(pid: pid, onScreen: onScreen[pid] ?? [], appHidden: hidden.contains(pid))
                 }
-                elsewhere = WindowMatch.appsWithWindowsElsewhere()
+                (elsewhere, fullScreenElsewhere) = WindowMatch.appsWithWindowsElsewhere()
+                // "This desktop": from elsewhere, only full-screen apps (their desktop is their own) and one-copy
+                // apps (they can't open here, so they stay on the bar and a click goes to them).
+                if !allDesktops { elsewhere = fullScreenElsewhere.union(elsewhere.intersection(oneCopyPids)) }
             }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.apply(apps: apps, windows: byPid, elsewhere: elsewhere, trusted: trusted)
+                    // Taken mid-switch, or you've moved to another desktop since: not this desktop's apps.
+                    if startedAt >= self.settleUntil, Desktop.current == desktopAtStart {
+                        self.apply(apps: apps, windows: byPid, elsewhere: elsewhere, trusted: trusted)
+                        self.perDesktop[desktopAtStart] = self.groups
+                    }
                     self.inFlight = false
                     if self.pending { self.pending = false; self.scheduleRefresh() }
                 }
@@ -272,6 +347,8 @@ final class WindowTracker: ObservableObject {
             }
         }
 
+        // Every running app, shown or not (an app with no windows on this desktop is still running).
+        let running = Set(byKey.keys)
         var visible: [String: AppGroup] = [:]
         for pin in pins.items {
             if var g = byKey.removeValue(forKey: pin.bundleID) {
@@ -282,12 +359,15 @@ final class WindowTracker: ObservableObject {
                                                  pids: [], windows: [], isPinned: true, isActive: false)
             }
         }
+        // `elsewhere` already follows "Show apps from": with "This desktop" only full-screen apps count, so an
+        // app whose windows are on another desktop is off the bar like on Windows.
         for (k, g) in byKey where !trusted || showWindowlessApps || !g.windows.isEmpty || g.elsewhere { visible[k] = g }
 
-        // Pinned apps keep their spot forever; unpinned ones keep it while shown and
-        // go on the end when they come back (like Windows).
+        // Pinned apps keep their spot forever; unpinned ones keep it while they're running, even while they're
+        // off the bar because their windows are on another desktop, and go on the end once they've quit and
+        // come back (like Windows). (Forgetting them on every desktop switch reset your arrangement.)
         let before = order
-        order.removeAll { visible[$0] == nil }
+        order.removeAll { visible[$0] == nil && !running.contains($0) }
         for p in pins.items where !order.contains(p.bundleID) { order.append(p.bundleID) }
         for k in keysInLaunchOrder where visible[k] != nil && !order.contains(k) { order.append(k) }
         if order != before { saveOrder() }
@@ -298,7 +378,13 @@ final class WindowTracker: ObservableObject {
 
     /// Called after a drag on the bar.
     func setOrder(_ ids: [String]) {
-        order = ids + order.filter { !ids.contains($0) }
+        // The dragged (visible) apps take their new order in the slots they already had; apps hidden on
+        // another desktop keep their place in between.
+        let moved = Set(ids)
+        var next = ids.makeIterator()
+        var merged = order.map { moved.contains($0) ? (next.next() ?? $0) : $0 }
+        for extra in IteratorSequence(next) where !merged.contains(extra) { merged.append(extra) }
+        order = merged
         saveOrder()
         groups = order.compactMap { id in groups.first { $0.id == id } }
     }
@@ -345,6 +431,40 @@ final class WindowTracker: ObservableObject {
             if g.elsewhere, let pid = g.pids.first {
                 NSRunningApplication(processIdentifier: pid)?.activate()
                 refreshSoon()
+                return
+            }
+            // Running, but its windows are all on other desktops ("This desktop" + "Open apps on this desktop"):
+            // open it here, like Windows. macOS only jumps to another desktop when an app has no window on this
+            // one, so it stays when a new copy or a new window appears here.
+            let stay = !Self.allDesktops && (UserDefaults.standard.object(forKey: DockSetting.stayOnDesktop) as? Bool ?? true)
+            if stay, g.isRunning, let url = g.bundleURL, let pid = g.pids.first {
+                let before = Set(g.pids), desktop = Desktop.current, id = g.id
+                // Known one-copy app (Discord): straight to its window, no second launch.
+                if Self.oneCopy.contains(id) {
+                    NSRunningApplication(processIdentifier: pid)?.activate()
+                    refreshSoon()
+                    return
+                }
+                // 1. A new instance (what you'd get on Windows). A one-copy app (Discord) hands that to its running
+                //    copy, which comes forward with no window here, so macOS takes you to its window.
+                WindowActions.newInstance(url)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    guard let self else { return }
+                    let alive = NSRunningApplication.runningApplications(withBundleIdentifier: id).filter { !$0.isTerminated }
+                    let newCopy = alive.contains { !before.contains($0.processIdentifier) && $0.isFinishedLaunching }
+                    let hereNow = self.groups.first { $0.id == id }.map { !$0.windows.isEmpty } ?? false
+                    if !newCopy, !hereNow, Desktop.current != desktop { Self.learnOneCopy(id) }   // it handed over and went there
+                    guard !newCopy, !hereNow, Desktop.current == desktop else { self.refreshSoon(); return }
+                    // 2. Still nothing here: its own File › New Window, made before it comes forward.
+                    if WindowActions.newWindowHere(pid: pid) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { NSRunningApplication(processIdentifier: pid)?.activate() }
+                    } else {
+                        // 3. Neither: go to its window (macOS switches desktops), and remember it runs one copy.
+                        NSRunningApplication(processIdentifier: pid)?.activate()
+                        Self.learnOneCopy(id)
+                    }
+                    self.refreshSoon()
+                }
                 return
             }
             if let url = g.bundleURL { WindowActions.open(url) }

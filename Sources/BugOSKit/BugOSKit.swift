@@ -44,6 +44,12 @@ public enum DockSetting {
     public static let showPreviews = "showPreviews"
     /// Seconds before a preview appears (default 0.35).
     public static let previewDelay = "previewDelay"
+    /// Which windows the taskbar shows: "this" (default: only the desktop you're on, like Windows) or "all"
+    /// (every desktop, like the Mac Dock: nothing changes when you switch desktops).
+    public static let appsFromDesktops = "appsFromDesktops"
+    /// With "This desktop": opening an app stays on this desktop (a new window here) instead of jumping to
+    /// another desktop where it has windows. Default on.
+    public static let stayOnDesktop = "stayOnDesktop"
     /// A taskbar on every display, not just the main one (default on).
     public static let allDisplays = "barAllDisplays"
     /// With several taskbars, which apps each shows: "all" (default, every app on every bar) or "where"
@@ -295,6 +301,7 @@ public struct Shortcut: Equatable, Hashable {
         UInt16(kVK_ANSI_0): "0", UInt16(kVK_ANSI_1): "1", UInt16(kVK_ANSI_2): "2", UInt16(kVK_ANSI_3): "3",
         UInt16(kVK_ANSI_4): "4", UInt16(kVK_ANSI_5): "5", UInt16(kVK_ANSI_6): "6", UInt16(kVK_ANSI_7): "7",
         UInt16(kVK_ANSI_8): "8", UInt16(kVK_ANSI_9): "9", UInt16(kVK_ANSI_E): "E", UInt16(kVK_ANSI_S): "S",
+        UInt16(kVK_ANSI_V): "V",
     ]
     static func keyName(_ code: UInt16, chars: String?) -> String {
         if let f = functionKeys[code] { return f }
@@ -451,4 +458,44 @@ public enum MiscSetting {
     public static let shiftScroll = "shiftScrollSideways"
     /// Shift + scroll: "default" (the Mac's own), "sideways" (always) or "vertical" (never sideways).
     public static let shiftScrollMode = "shiftScrollMode"
+}
+
+/// Window snapping (BugOS › Snapping), in the taskbar's preferences. All on by default.
+public enum SnapSetting {
+    public static let enabled = "snapEnabled"
+    /// ⌃⌥ + arrow keys.
+    public static let keys = "snapKeys"
+    /// Drag a window to an edge or corner.
+    public static let drag = "snapDrag"
+    /// Snap layouts: drag to the top, or rest the pointer on the green button.
+    public static let layouts = "snapLayouts"
+    /// After a half or third, offer the other windows for the rest of the screen.
+    public static let assist = "snapAssist"
+}
+
+/// Clipboard history (BugOS › Clipboard), in the taskbar's preferences.
+public enum ClipboardSetting {
+    /// On by default.
+    public static let enabled = "clipboardEnabled"
+    /// Shortcut.stored; missing = ⌃⌥V, "" = none.
+    public static let shortcut = "clipboardShortcut"
+    public static let defaultShortcut = Shortcut(kVK_ANSI_V, controlKey | optionKey)
+    /// How many (unpinned) items to keep: 25 (default), 50 or 100.
+    public static let limit = "clipboardLimit"
+    /// Paste the item straight into the app (default) or only copy it.
+    public static let pasteNow = "clipboardPasteNow"
+}
+
+/// BugOS › Mouse settings that BugOS does itself (the rest are the Mac's own pointer settings).
+public enum MouseSetting {
+    /// Lines per mouse-wheel notch, no scroll acceleration (0 = the Mac's own scrolling). Default 3.
+    public static let wheelLines = "mouseWheelLines"
+}
+
+/// BugOS › Full Screen (in the taskbar's preferences).
+public enum FullScreenSetting {
+    /// The green button maximizes like Windows (⌘-click = the Mac's full screen). Default on.
+    public static let greenMaximizes = "greenMaximizes"
+    /// The taskbar hides while an app is full screen. Default on.
+    public static let hideBar = "hideBarForFullScreen"
 }

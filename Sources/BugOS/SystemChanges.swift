@@ -159,6 +159,117 @@ enum SystemChanges {
         if FileManager.default.fileExists(atPath: stateDir.appendingPathComponent("restore-swipe.plist").path) { setMuted(notificationSwipe, false) }
     }
 
+    // MARK: Mouse and trackpad (BugOS › Mouse)
+
+    /// The Mac's own pointer settings, changed in place (no driver). The values from before BugOS first
+    /// changed one are saved and put back on uninstall.
+    enum Pointer {
+        static let keys = ["com.apple.mouse.linear", "com.apple.mouse.scaling", "com.apple.scrollwheel.scaling",
+                           "com.apple.trackpad.scaling", "com.apple.swipescrolldirection", "AppleActionOnDoubleClick"]
+        static func string(_ key: String, _ d: String) -> String { value(key) as? String ?? d }
+        static let restoreFile = stateDir.appendingPathComponent("restore-mouse.plist")
+
+        static func value(_ key: String) -> Any? {
+            CFPreferencesAppSynchronize(kCFPreferencesAnyApplication)
+            return CFPreferencesCopyAppValue(key as CFString, kCFPreferencesAnyApplication)
+        }
+        static func double(_ key: String, _ d: Double) -> Double { (value(key) as? NSNumber)?.doubleValue ?? d }
+        static func bool(_ key: String, _ d: Bool) -> Bool { (value(key) as? NSNumber)?.boolValue ?? d }
+
+        static func set(_ key: String, _ v: Any) {
+            saveOnce()
+            let value: CFPropertyList = (v as? Bool).map { $0 as NSNumber } ?? ((v as? Double).map { $0 as NSNumber }
+                ?? ((v as? String).map { $0 as NSString } ?? (v as! CFPropertyList)))
+            CFPreferencesSetAppValue(key as CFString, value, kCFPreferencesAnyApplication)
+            CFPreferencesAppSynchronize(kCFPreferencesAnyApplication)
+            applySoon()
+        }
+
+        /// Takes effect straight away (the way System Settings does it), once a slider stops moving.
+        nonisolated(unsafe) private static var pending: DispatchWorkItem?
+        static func applySoon() {
+            pending?.cancel()
+            let work = DispatchWorkItem { DispatchQueue.global(qos: .userInitiated).async { apply() } }
+            pending = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        }
+        static func apply() {
+            shell("/System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings", "-u")
+        }
+
+        private static func saveOnce() {
+            guard !FileManager.default.fileExists(atPath: restoreFile.path) else { return }
+            var saved: [String: Any] = [:]
+            for k in keys { if let v = value(k) { saved[k] = v } }
+            try? FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+            (saved as NSDictionary).write(to: restoreFile, atomically: true)
+        }
+
+        /// Uninstall: everything back how it was.
+        static func restore() {
+            guard let saved = NSDictionary(contentsOf: restoreFile) as? [String: Any] else { return }
+            for k in keys {
+                if let str = saved[k] as? String {
+                    shell("/usr/bin/defaults", "write", "-g", k, "-string", str)
+                } else if let n = saved[k] as? NSNumber {
+                    if CFGetTypeID(n) == CFBooleanGetTypeID() { shell("/usr/bin/defaults", "write", "-g", k, "-bool", n.boolValue ? "true" : "false") }
+                    else { shell("/usr/bin/defaults", "write", "-g", k, "-float", n.stringValue) }
+                } else {
+                    shell("/usr/bin/defaults", "delete", "-g", k)
+                }
+            }
+            try? FileManager.default.removeItem(at: restoreFile)
+            apply()
+        }
+    }
+
+    // MARK: Staying on this desktop
+
+    /// macOS jumps to another desktop when you open an app whose windows are there ("When switching to an
+    /// application, switch to a Space with open windows for the application"). With the taskbar on "This
+    /// desktop" (and BugOS › Taskbar › Open apps on this desktop, on by default) that's turned off, like
+    /// Windows: clicking Chrome on desktop 1 opens a new window here instead of taking you to desktop 2.
+    /// The old value is saved and put back when it's no longer wanted, or on uninstall.
+    enum DesktopSwitch {
+        static let key = "workspaces-auto-swoosh"
+        static let restoreFile = stateDir.appendingPathComponent("restore-swoosh.plist")
+
+        static var current: Bool? {
+            CFPreferencesAppSynchronize("com.apple.dock" as CFString)
+            return (CFPreferencesCopyAppValue(key as CFString, "com.apple.dock" as CFString) as? NSNumber)?.boolValue
+        }
+
+        @MainActor static func sync() {
+            CFPreferencesAppSynchronize(BugOSID.dock as CFString)
+            func dock<T>(_ k: String, _ d: T) -> T { CFPreferencesCopyAppValue(k as CFString, BugOSID.dock as CFString) as? T ?? d }
+            // No longer turned off (2026-11-09): with it off, macOS wouldn't even take you to a one-copy app's
+            // window (Discord). The taskbar opens apps here another way; this only puts back what 1.6 betas changed.
+            _ = dock(DockSetting.stayOnDesktop, true)
+            let stay = false
+            let saved = FileManager.default.fileExists(atPath: restoreFile.path)
+            if stay && !saved {
+                var d: [String: Any] = [:]
+                if let v = current { d["value"] = v }
+                try? FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+                (d as NSDictionary).write(to: restoreFile, atomically: true)
+                shell("/usr/bin/defaults", "write", "com.apple.dock", key, "-bool", "false")
+                shell("/usr/bin/killall", "Dock")
+                Supervisor.shared.log("staying on this desktop when opening apps (macOS desktop jumping off)")
+            } else if !stay && saved {
+                restore()
+                Supervisor.shared.log("desktop jumping back how it was")
+            }
+        }
+
+        static func restore() {
+            guard let d = NSDictionary(contentsOf: restoreFile) as? [String: Any] else { return }
+            if let v = d["value"] as? Bool { shell("/usr/bin/defaults", "write", "com.apple.dock", key, "-bool", v ? "true" : "false") }
+            else { shell("/usr/bin/defaults", "delete", "com.apple.dock", key) }
+            try? FileManager.default.removeItem(at: restoreFile)
+            shell("/usr/bin/killall", "Dock")
+        }
+    }
+
     // MARK: Folders
 
     /// File Explorer takes over folders: it redirects Finder windows (macOS 26+, see FinderRedirect in
@@ -229,6 +340,8 @@ enum SystemChanges {
         if saved == nil {
             setStartsAtLogin(true)
             setDockTucked(true)
+            // Pointer acceleration off by default, like a gaming mouse setup (saved first; back on uninstall).
+            if !Pointer.bool("com.apple.mouse.linear", false) { Pointer.set("com.apple.mouse.linear", true) }
             // Folders open in File Explorer by default (Finder comes back from the page or Uninstall).
             var done = false
             setExplorerOpensFolders(true) { done = true }
@@ -257,6 +370,8 @@ enum SystemChanges {
             for _ in 0..<60 where !done { pump(0.05) }
         }
         restoreTrackpadGestures()
+        Pointer.restore()
+        DesktopSwitch.restore()
         setStartsAtLogin(false)
         // Permission entries in System Settings go too.
         for id in [BugOSID.os, BugOSID.dock, BugOSID.explorer, BugOSID.squiggle] { shell("/usr/bin/tccutil", "reset", "All", id) }

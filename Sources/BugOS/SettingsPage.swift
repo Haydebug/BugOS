@@ -40,7 +40,7 @@ let explorerPrefs = PartPrefs(domain: BugOSID.explorer, changed: BugOSID.explore
 let squigglePrefs = PartPrefs(domain: BugOSID.squiggle, changed: BugOSID.squiggleSettingsChanged)
 
 enum PageSection: String, CaseIterable, Identifiable {
-    case general, features, permissions, taskbar, altTab, quickCorner, quickAccess, explorer, squiggle, misc
+    case general, features, permissions, taskbar, altTab, snapping, fullScreen, quickCorner, quickAccess, clipboard, explorer, squiggle, mouse
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -52,10 +52,41 @@ enum PageSection: String, CaseIterable, Identifiable {
         case .quickCorner: "Quick Corner"
         case .quickAccess: "Quick Access"
         case .altTab: "Alt-Tab"
-        case .misc: "Misc"
+        case .snapping: "Snapping"
+        case .fullScreen: "Full Screen"
+        case .clipboard: "Clipboard"
+        case .mouse: "Mouse"
         case .explorer: "File Explorer"
         }
     }
+    /// The sidebar's headings, in order.
+    static let groups: [(title: String, sections: [PageSection])] = [
+        ("", [.general, .features, .permissions]),   // the first group, under the BugOS name: no heading
+        ("Taskbar & windows", [.taskbar, .altTab, .snapping, .fullScreen]),
+        ("Shortcuts", [.quickCorner, .quickAccess, .clipboard]),
+        ("Apps", [.explorer, .squiggle]),
+        ("Input", [.mouse]),
+    ]
+
+    /// What's on each page, for the sidebar's search.
+    var keywords: String {
+        switch self {
+        case .general: "updates version accent colour color start at login dock tuck restart log uninstall"
+        case .features: "turn off on parts taskbar file explorer squiggle disable"
+        case .permissions: "accessibility screen recording full disk access microphone privacy allow"
+        case .taskbar: "size alignment centre left background opacity colour shape floating corner indicator pill previews music spotify desktops displays monitors all desktops this desktop open apps"
+        case .altTab: "alt tab option command switch windows order sort recent alphabetical preview size minimized"
+        case .snapping: "snap layouts halves quarters drag edge keyboard arrows assist split"
+        case .fullScreen: "green button maximize fill zoom double-click title bar hide taskbar full screen"
+        case .quickCorner: "fan corner curve tile icon colour shortcuts music ai browser discord recent add"
+        case .quickAccess: "trackpad swipe gesture right edge notification center keyboard shortcut list"
+        case .clipboard: "history copy paste pin win v shortcut keep clear"
+        case .explorer: "folders finder theme windows mica liquid glass tint dark light icon navigation pane applications hidden extensions view tabs save open dialogs shortcut"
+        case .squiggle: "screenshot snip record shortcuts keys save folder pen colour microphone audio thumbnail"
+        case .mouse: "pointer acceleration speed scroll wheel lines notch natural trackpad shift sideways scrolling"
+        }
+    }
+
     var symbol: String {
         switch self {
         case .general: "gearshape"
@@ -66,7 +97,10 @@ enum PageSection: String, CaseIterable, Identifiable {
         case .quickCorner: "square.stack.3d.up"
         case .quickAccess: "hand.draw"
         case .altTab: "rectangle.on.rectangle"
-        case .misc: "ellipsis.circle"
+        case .snapping: "rectangle.split.2x1"
+        case .fullScreen: "arrow.up.left.and.arrow.down.right"
+        case .clipboard: "doc.on.clipboard"
+        case .mouse: "computermouse"
         case .explorer: "folder"
         }
     }
@@ -77,6 +111,15 @@ final class PageModel: ObservableObject {
     @Published var section: PageSection
     @Published var perms: [Perm: Bool] = [:]
     @Published var refresh = 0          // bumped to redraw values read straight from preferences
+    @Published var search = ""
+    {
+        didSet {
+            // Typing a search goes to the first page that matches.
+            let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+            if !q.isEmpty, let first = PageSection.allCases.first(where: { ($0.title + " " + $0.keywords).lowercased().contains(q) }),
+               !( (section.title + " " + section.keywords).lowercased().contains(q) ) { section = first }
+        }
+    }
     private var initial: [Perm: Bool] = [:]
     private var timer: Timer?
 
@@ -119,15 +162,40 @@ struct PageView: View {
                         Text("Version \(SystemChanges.version)").font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                 }
-                .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 14)
-                ForEach(PageSection.allCases) { s in
-                    SidebarRow(section: s, selected: model.section == s,
-                               warning: s == .permissions && model.missingRequired) { model.section = s }
+                .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 10)
+                SidebarSearch(text: $model.search)
+                    .padding(.bottom, 6)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        let q = model.search.trimmingCharacters(in: .whitespaces).lowercased()
+                        if q.isEmpty {
+                            ForEach(PageSection.groups, id: \.title) { group in
+                                if !group.title.isEmpty {
+                                    Text(group.title.uppercased())
+                                        .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary)
+                                        .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 3)
+                                }
+                                ForEach(group.sections) { s in
+                                    SidebarRow(section: s, selected: model.section == s,
+                                               warning: s == .permissions && model.missingRequired) { model.section = s }
+                                }
+                            }
+                        } else {
+                            // Search: pages whose name or contents match.
+                            let hits = PageSection.allCases.filter { ($0.title + " " + $0.keywords).lowercased().contains(q) }
+                            if hits.isEmpty {
+                                Text("No settings match").font(.system(size: 12)).foregroundStyle(.secondary).padding(10)
+                            }
+                            ForEach(hits) { s in
+                                SidebarRow(section: s, selected: model.section == s, warning: false) { model.section = s }
+                            }
+                        }
+                    }
                 }
-                Spacer()
+                .scrollIndicators(.hidden)
             }
             .padding(10)
-            .frame(width: 200)
+            .frame(width: 210)
             .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
 
             Divider()
@@ -143,7 +211,10 @@ struct PageView: View {
                         case .quickCorner: QuickCornerSection()
                         case .quickAccess: QuickAccessSection()
                         case .altTab: AltTabSection()
-                        case .misc: MiscSection()
+                        case .snapping: SnappingSection()
+                        case .fullScreen: FullScreenSection()
+                        case .clipboard: ClipboardSection()
+                        case .mouse: MouseSection()
                         case .explorer: ExplorerSection()
                         case .features: FeaturesSection()
                         case .squiggle: SquiggleSection()
@@ -166,7 +237,23 @@ struct PageView: View {
                 .padding(.horizontal, 20).padding(.vertical, 12)
             }
         }
-        .frame(width: 780, height: 560)
+        .frame(width: 800, height: 640)
+    }
+}
+
+struct SidebarSearch: View {
+    @Binding var text: String
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
+            TextField("Search settings", text: $text).textFieldStyle(.plain).font(.system(size: 12.5))
+            if !text.isEmpty {
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 9).frame(height: 28)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.07)))
+        .padding(.horizontal, 2)
     }
 }
 
@@ -388,6 +475,20 @@ struct PermissionsSection: View {
     @ObservedObject var model: PageModel
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            // Every permission on: say so.
+            if Perm.allCases.allSatisfy({ model.perms[$0] == true }) {
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.seal.fill").font(.system(size: 26)).foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("You're good to go!").font(.system(size: 15, weight: .semibold))
+                        Text("Every permission is on, so all of BugOS works.").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.12)))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.green.opacity(0.35)))
+            }
             Text("macOS asks once for each of these. They're all listed under \u{201C}BugOS\u{201D}: one switch covers the taskbar, File Explorer and Squiggle.")
                 .font(.system(size: 12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             SettingsGroup {
@@ -441,6 +542,8 @@ struct TaskbarSection: View {
     @State private var spotifyID: String = dockPrefs.value(DockSetting.spotifyClientID, default: "")
     @State private var spotifyOn: Bool = dockPrefs.value("spotifyConnected", default: false)
     @State private var allDisplays: Bool = dockPrefs.value(DockSetting.allDisplays, default: true)
+    @State private var fromDesktops: String = dockPrefs.value(DockSetting.appsFromDesktops, default: "this")
+    @State private var stayOn: Bool = dockPrefs.value(DockSetting.stayOnDesktop, default: true)
     @State private var appsOn: String = dockPrefs.value(DockSetting.barAppsOn, default: "all")
     private let spotifyTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
     @State private var size: String = dockPrefs.value(DockSetting.barSize, default: "medium")
@@ -492,6 +595,19 @@ struct TaskbarSection: View {
                 PickerRow(title: "Running app mark", selection: Binding(get: { indicator }, set: {
                     indicator = $0; dockPrefs.set(DockSetting.indicator, $0)
                 }), options: [("pill", "Pill"), ("dot", "Dot"), ("line", "Line"), ("none", "None")])
+            }
+            Text("Desktops").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+            SettingsGroup(footer: "This desktop: only apps with windows on the desktop you're on, like Windows. The bar can only change once macOS has finished the swipe to another desktop, so you see it switch over. All desktops: every running app on every desktop, like the Mac Dock, so swiping changes nothing.") {
+                PickerRow(title: "Show apps from", selection: Binding(get: { fromDesktops }, set: {
+                    fromDesktops = $0; dockPrefs.set(DockSetting.appsFromDesktops, $0); SystemChanges.DesktopSwitch.sync()
+                }), options: [("this", "This desktop"), ("all", "All desktops")])
+                RowDivider()
+                ToggleRow(title: "Open apps on this desktop",
+                          detail: "Clicking an app whose windows are on another desktop opens it here (a new window, or a new copy) instead of taking you there, like Windows. Apps that only run once and can't open a second window, like Discord, take you to their window.",
+                          isOn: Binding(get: { stayOn }, set: {
+                              stayOn = $0; dockPrefs.set(DockSetting.stayOnDesktop, $0); SystemChanges.DesktopSwitch.sync()
+                          }))
+                .disabled(fromDesktops == "all").opacity(fromDesktops == "all" ? 0.45 : 1)
             }
             Text("Multiple displays").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
             SettingsGroup(footer: "Like Windows: a taskbar along the bottom of every screen. The main screen's keeps the music, the quick corner and Alt-Tab.") {
@@ -618,7 +734,109 @@ struct QuickCornerSection: View {
     }
 }
 
-struct MiscSection: View {
+struct SnappingSection: View {
+    @State private var enabled: Bool = dockPrefs.value(SnapSetting.enabled, default: true)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            PartOffBanner(part: .dock)
+            SettingsGroup(footer: "Like Windows 11. Snapped windows stop above the taskbar, on every screen.") {
+                ToggleRow(title: "Window snapping", isOn: Binding(get: { enabled }, set: { enabled = $0; dockPrefs.set(SnapSetting.enabled, $0) }))
+            }
+            SettingsGroup(footer: "⌃⌥ ← → snaps to a half; again sends it to the next screen. ⌃⌥ ↑ maximizes (or the top quarter of a half), ⌃⌥ ↓ restores (or the bottom quarter, or minimizes). ⌃ + arrows on their own stay the Mac's desktop and Mission Control keys.") {
+                ToggleRow(title: "Keyboard: ⌃⌥ + arrow keys", isOn: dockPrefs.binding(SnapSetting.keys, default: true))
+                RowDivider()
+                ToggleRow(title: "Drag to an edge or corner", detail: "Left or right edge for a half, a corner for a quarter. Drag a snapped window away to get its old size back.",
+                          isOn: dockPrefs.binding(SnapSetting.drag, default: true))
+                RowDivider()
+                ToggleRow(title: "Snap layouts", detail: "Drag a window to the top of the screen, or rest the pointer on its green button, and pick a zone.",
+                          isOn: dockPrefs.binding(SnapSetting.layouts, default: true))
+                RowDivider()
+                ToggleRow(title: "Snap assist", detail: "After snapping one window, the rest of the screen shows your other windows: click one to fill it.",
+                          isOn: dockPrefs.binding(SnapSetting.assist, default: true))
+            }
+            .disabled(!enabled).opacity(enabled ? 1 : 0.45)
+        }
+    }
+}
+
+struct FullScreenSection: View {
+    @State private var green: Bool = dockPrefs.value(FullScreenSetting.greenMaximizes, default: true)
+    @State private var doubleClick: String = SystemChanges.Pointer.string("AppleActionOnDoubleClick", "Fill")
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            PartOffBanner(part: .dock)
+            SettingsGroup(footer: "Like Windows' maximize button: the window fills the screen above the taskbar and stays on this desktop. Click again to put it back. Hold ⌘ while clicking for the Mac's real full screen (its own desktop, menu bar hidden).") {
+                ToggleRow(title: "Green button maximizes", detail: green ? "⌘-click for real full screen." : "The Mac's own: full screen on its own desktop.",
+                          isOn: Binding(get: { green }, set: { green = $0; dockPrefs.set(FullScreenSetting.greenMaximizes, $0) }))
+            }
+            SettingsGroup(footer: "The Mac's own setting (also in System Settings › Desktop & Dock). Fill is Windows' maximize. Put back on uninstall.") {
+                MenuPickerRow(title: "Double-click a title bar to", selection: Binding(get: { doubleClick }, set: {
+                    doubleClick = $0; SystemChanges.Pointer.set("AppleActionOnDoubleClick", $0)
+                }), options: [("Fill", "Fill (maximize)"), ("Maximize", "Zoom"), ("Minimize", "Minimize"), ("None", "Do nothing")])
+            }
+            SettingsGroup {
+                ToggleRow(title: "Hide the taskbar for full-screen apps",
+                          detail: "While a game, video or app is full screen on a screen, its taskbar gets out of the way.",
+                          isOn: dockPrefs.binding(FullScreenSetting.hideBar, default: true))
+            }
+        }
+    }
+}
+
+struct ClipboardSection: View {
+    @State private var enabled: Bool = dockPrefs.value(ClipboardSetting.enabled, default: true)
+    @State private var shortcut: Shortcut? = {
+        guard let s: String = dockPrefs.value(ClipboardSetting.shortcut, default: nil as String?) else { return ClipboardSetting.defaultShortcut }
+        return Shortcut(stored: s)
+    }()
+    @State private var limit: String = "\(dockPrefs.value(ClipboardSetting.limit, default: 25))"
+    @State private var cleared = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            PartOffBanner(part: .dock)
+            SettingsGroup(footer: "Like Windows + V: your recent copies (text, images, files), newest first. Pick one to paste it into the app you're in. Pinned items stay after restarts; the rest are kept in memory only. Copies a password manager marks as secret are never kept, and nothing leaves your Mac.") {
+                ToggleRow(title: "Clipboard history", isOn: Binding(get: { enabled }, set: { enabled = $0; dockPrefs.set(ClipboardSetting.enabled, $0) }))
+                RowDivider()
+                ShortcutRow(title: "Shortcut", detail: "Then ↑ ↓ and Return, or click. Delete removes one, Esc closes.",
+                            shortcuts: Binding(get: { shortcut.map { [$0] } ?? [] }, set: { list in
+                                shortcut = list.last
+                                dockPrefs.set(ClipboardSetting.shortcut, shortcut?.stored ?? "")
+                            }), defaults: [ClipboardSetting.defaultShortcut], single: true, prefs: dockPrefs)
+                    .disabled(!enabled).opacity(enabled ? 1 : 0.45)
+            }
+            SettingsGroup {
+                PickerRow(title: "Keep", selection: Binding(get: { limit }, set: {
+                    limit = $0; dockPrefs.set(ClipboardSetting.limit, Int($0) ?? 25)
+                }), options: [("25", "25 items"), ("50", "50"), ("100", "100")])
+                RowDivider()
+                ToggleRow(title: "Paste right away", detail: "Off: picking an item only copies it, and you paste it yourself.",
+                          isOn: dockPrefs.binding(ClipboardSetting.pasteNow, default: true))
+                RowDivider()
+                HStack {
+                    Text("Clear history").font(.system(size: 13))
+                    Text(cleared ? "Cleared (pinned items kept)" : "").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Clear") { dockPrefs.command("clipboard:clear"); cleared = true }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+            }
+            .disabled(!enabled).opacity(enabled ? 1 : 0.45)
+        }
+    }
+}
+
+struct MouseSection: View {
+    typealias P = SystemChanges.Pointer
+    @State private var accel = !P.bool("com.apple.mouse.linear", false)
+    @State private var speed = P.double("com.apple.mouse.scaling", 1)
+    @State private var scroll = P.double("com.apple.scrollwheel.scaling", 0.3125)
+    @State private var pad = P.double("com.apple.trackpad.scaling", 1)
+    @State private var natural = P.bool("com.apple.swipescrolldirection", true)
+    private let linearMouse = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.lujjjh.LinearMouse").isEmpty
+    @State private var wheelLines: Int = dockPrefs.value(MouseSetting.wheelLines, default: 3)
     @State private var shift: String = {
         if let m: String = dockPrefs.value(MiscSetting.shiftScrollMode, default: nil as String?) { return m }
         return dockPrefs.value(MiscSetting.shiftScroll, default: false) ? "sideways" : "default"
@@ -626,11 +844,56 @@ struct MiscSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            PartOffBanner(part: .dock)
+            if linearMouse {
+                Label("LinearMouse is running: its own settings can override these while it's open.", systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 12)).foregroundStyle(.orange)
+            }
+            Text("Mouse").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+            SettingsGroup(footer: "Acceleration is Windows' \u{201C}Enhance pointer precision\u{201D}: the faster you move, the farther the pointer goes. Off = the pointer moves exactly as far as your hand, which most games and designers prefer.") {
+                ToggleRow(title: "Pointer acceleration", isOn: Binding(get: { accel }, set: {
+                    accel = $0; P.set("com.apple.mouse.linear", !$0)
+                }))
+                RowDivider()
+                SliderRow(title: "Pointer speed", value: Binding(get: { speed }, set: {
+                    speed = $0; P.set("com.apple.mouse.scaling", $0)
+                }), range: 0...3, step: 0.0625, format: { String(format: "%.2f", $0) })
+            }
+            SettingsGroup(footer: "Like Windows: every notch of the wheel scrolls the same number of lines, however fast you turn it. Mac: the Mac's own accelerated scrolling (and its Scroll speed). Trackpads and the Magic Mouse aren't affected.") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Mouse wheel").font(.system(size: 13))
+                        Text(wheelLines == 0 ? "The Mac's own scrolling." : "\(wheelLines) line\(wheelLines == 1 ? "" : "s") per notch, no acceleration.")
+                            .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Picker("", selection: Binding(get: { wheelLines == 0 ? "mac" : "lines" }, set: {
+                        wheelLines = $0 == "mac" ? 0 : 3; dockPrefs.set(MouseSetting.wheelLines, wheelLines)
+                    })) { Text("Lines").tag("lines"); Text("Mac").tag("mac") }
+                        .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    Stepper("", value: Binding(get: { max(1, wheelLines) }, set: {
+                        wheelLines = $0; dockPrefs.set(MouseSetting.wheelLines, $0)
+                    }), in: 1...12).labelsHidden().disabled(wheelLines == 0)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                RowDivider()
+                SliderRow(title: "Scroll speed (Mac)", value: Binding(get: { scroll }, set: {
+                    scroll = $0; P.set("com.apple.scrollwheel.scaling", $0)
+                }), range: 0...1.5, step: 0.03125, format: { String(format: "%.2f", $0) })
+                .disabled(wheelLines != 0).opacity(wheelLines != 0 ? 0.45 : 1)
+            }
             SettingsGroup(footer: "Mac: a mouse wheel scrolls sideways while you hold Shift. Sideways: always, trackpad too, like Windows. Up and down: Shift never turns scrolling sideways, handy in games where Shift is sprint and the wheel zooms (Roblox).") {
                 PickerRow(title: "Shift + scroll", selection: Binding(get: { shift }, set: {
                     shift = $0; dockPrefs.set(MiscSetting.shiftScrollMode, $0)
                 }), options: [("default", "Mac"), ("sideways", "Sideways"), ("vertical", "Up and down")])
+            }
+            Text("Trackpad and scrolling").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+            SettingsGroup(footer: "These are the Mac's own settings (the same as in System Settings), changed in place. What you had before BugOS changed them comes back if you uninstall.") {
+                SliderRow(title: "Trackpad speed", value: Binding(get: { pad }, set: {
+                    pad = $0; P.set("com.apple.trackpad.scaling", $0)
+                }), range: 0...3, step: 0.0625, format: { String(format: "%.2f", $0) })
+                RowDivider()
+                ToggleRow(title: "Natural scrolling", detail: "Off scrolls like Windows: the page moves the opposite way to your fingers.",
+                          isOn: Binding(get: { natural }, set: { natural = $0; P.set("com.apple.swipescrolldirection", $0) }))
             }
         }
     }
@@ -1504,7 +1767,7 @@ final class PageController: NSObject, NSWindowDelegate {
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: PageView(model: model) { [weak self] in self?.window.close() })
-        window.setContentSize(NSSize(width: 780, height: 560))
+        window.setContentSize(NSSize(width: 800, height: 640))
         window.center()
         window.delegate = self
     }

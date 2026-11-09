@@ -35,9 +35,13 @@ enum WindowMatch {
 
     /// Apps with real windows that aren't on this desktop (on another desktop, or a full-screen one): named,
     /// window-sized, visible windows the window server has but isn't showing here.
-    static func appsWithWindowsElsewhere() -> Set<pid_t> {
+    /// `fullScreen`: the ones whose off-desktop window exactly fills a display (a full-screen app's own
+    /// desktop), which count even with "This desktop".
+    static func appsWithWindowsElsewhere() -> (any: Set<pid_t>, fullScreen: Set<pid_t>) {
         let info = (CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
-        var out = Set<pid_t>()
+        let mainH = NSScreen.screens.first?.frame.height ?? 0
+        let displays = NSScreen.screens.map { CGRect(x: $0.frame.minX, y: mainH - $0.frame.maxY, width: $0.frame.width, height: $0.frame.height) }
+        var out = Set<pid_t>(), full = Set<pid_t>()
         for d in info {
             guard let pid = d[kCGWindowOwnerPID as String] as? Int32,
                   (d[kCGWindowLayer as String] as? Int) == 0,
@@ -47,8 +51,11 @@ enum WindowMatch {
                   let b = d[kCGWindowBounds as String] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: b), r.width >= 200, r.height >= 150 else { continue }
             out.insert(pid)
+            if displays.contains(where: { abs($0.minX - r.minX) < 2 && abs($0.minY - r.minY) < 2 && abs($0.width - r.width) < 2 && abs($0.height - r.height) < 2 }) {
+                full.insert(pid)
+            }
         }
-        return out
+        return (out, full)
     }
 
     /// Assigns AX windows (front-to-back, with frame and title) to distinct CG windows of the same app.
