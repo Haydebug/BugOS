@@ -7,7 +7,7 @@ import BugOSKit
 @MainActor
 final class PreviewController {
     private let tracker: WindowTracker
-    private unowned let bar: TaskbarController
+    private(set) unowned var bar: TaskbarController
     private let panel = FloatingPanel(level: .taskbarPopup)
     private var groupID: String?
     private var anchor: CGRect = .zero
@@ -118,12 +118,20 @@ struct PreviewView: View {
                             }
                         }
                     }
+                    if NowPlaying.players.contains(g.id) {
+                        MediaButtons(player: g.id, nowPlaying: controller.bar.nowPlaying).frame(maxWidth: .infinity)
+                    }
                 }
                 .padding(6)
             } else if let g {
-                Text(g.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .padding(.horizontal, 12).padding(.vertical, 7)
+                VStack(spacing: 2) {
+                    Text(g.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .padding(.horizontal, 12).padding(.top, 7).padding(.bottom, NowPlaying.players.contains(g.id) ? 0 : 7)
+                    if NowPlaying.players.contains(g.id) {
+                        MediaButtons(player: g.id, nowPlaying: controller.bar.nowPlaying).padding(.horizontal, 6).padding(.bottom, 4)
+                    }
+                }
             }
         }
         .fixedSize()
@@ -221,5 +229,44 @@ struct WindowCard: View {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+    }
+}
+
+/// ⏮ ⏯ ⏭ under Spotify's or Music's preview, like Windows 11's thumbnail toolbar.
+struct MediaButtons: View {
+    let player: String
+    @ObservedObject var nowPlaying: NowPlaying
+
+    var body: some View {
+        HStack(spacing: 6) {
+            button("backward.fill", "Previous") { nowPlaying.send(.previous, to: player) }
+            button(nowPlaying.isPlaying(player) ? "pause.fill" : "play.fill", nowPlaying.isPlaying(player) ? "Pause" : "Play", big: true) {
+                nowPlaying.send(.playPause, to: player)
+            }
+            button("forward.fill", "Next") { nowPlaying.send(.next, to: player) }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func button(_ symbol: String, _ tip: String, big: Bool = false, action: @escaping () -> Void) -> some View {
+        MediaButton(symbol: symbol, big: big, action: action).help(tip)
+    }
+}
+
+private struct MediaButton: View {
+    let symbol: String
+    let big: Bool
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: big ? 15 : 12, weight: .semibold))
+                .frame(width: big ? 44 : 36, height: 30)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.white.opacity(hovering ? 0.14 : 0.06)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .onHover { hovering = $0 }
     }
 }

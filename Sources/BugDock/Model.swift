@@ -118,7 +118,7 @@ final class IconCache: ObservableObject {
         var img: NSImage
         if let custom = NSImage(contentsOf: Self.customURL(g.id)) {
             img = custom
-        } else if g.id == BugOSID.explorer, ExplorerSetting.isDark, let url = g.bundleURL,
+        } else if g.id == BugOSID.explorer, ExplorerSetting.iconIsDark, let url = g.bundleURL,
                   let dark = NSImage(contentsOf: url.appendingPathComponent("Contents/Resources/AppIconDark.icns")) {
             img = dark   // File Explorer is in dark mode
         } else if g.id == "com.apple.finder" {

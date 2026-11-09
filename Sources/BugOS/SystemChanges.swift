@@ -2,6 +2,7 @@
 //   - start at login (a LaunchAgent),
 //   - the Mac Dock tucked away (left side, auto-hide) and the bottom-right hot corner off,
 //   - File Explorer as the app that opens folders (on by default; Finder again if you turn it off),
+//   - Notification Center's trackpad swipe off while the quick corner's gesture (which takes its place) is on,
 // plus first-run setup (moving into Applications) and uninstalling.
 import AppKit
 import BugOSKit
@@ -74,6 +75,88 @@ enum SystemChanges {
         }
         try? FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
         try? (lines.joined(separator: "\n") + "\n").write(to: restoreDockScript, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: Trackpad gestures macOS would take first
+
+    /// A macOS trackpad gesture BugOS turns off while the quick corner's gesture needs it:
+    ///   - Notification Center's swipe in from the right edge (the corner gesture also starts at the right edge),
+    ///   - three- or four-finger swipe up/down for Mission Control / App Exposé, whichever the corner gesture
+    ///     uses (they stay on the other one).
+    /// The old values are saved once and put back when it's no longer needed, or on uninstall.
+    struct TrackpadGesturePref {
+        let name: String          // for the log and the restore file
+        let key: String           // in the trackpad domains
+        let globalKey: String     // -currentHost -g
+        var restoreFile: URL { stateDir.appendingPathComponent("restore-\(name).plist") }
+        var mutedKey: String { "muted.\(name)" }
+    }
+    static let notificationSwipe = TrackpadGesturePref(name: "swipe", key: "TrackpadTwoFingerFromRightEdgeSwipeGesture",
+                                                       globalKey: "com.apple.trackpad.twoFingerFromRightEdgeSwipeGesture")
+    static let threeFingerVertical = TrackpadGesturePref(name: "three-finger-vertical", key: "TrackpadThreeFingerVertSwipeGesture",
+                                                         globalKey: "com.apple.trackpad.threeFingerVertSwipeGesture")
+    static let fourFingerVertical = TrackpadGesturePref(name: "four-finger-vertical", key: "TrackpadFourFingerVertSwipeGesture",
+                                                        globalKey: "com.apple.trackpad.fourFingerVertSwipeGesture")
+    private static let trackpadDomains = ["com.apple.AppleMultitouchTrackpad", "com.apple.driver.AppleBluetoothMultitouch.trackpad"]
+
+    static func isMuted(_ g: TrackpadGesturePref) -> Bool {
+        // (1.1 kept the Notification Center one under its own key.)
+        UserDefaults.standard.bool(forKey: g.mutedKey) || (g.name == "swipe" && UserDefaults.standard.bool(forKey: "notificationSwipeMuted"))
+    }
+
+    static func setMuted(_ g: TrackpadGesturePref, _ mute: Bool) {
+        let legacy = stateDir.appendingPathComponent("restore-swipe.plist")   // same file name as 1.1
+        let file = g.name == "swipe" ? legacy : g.restoreFile
+        if mute {
+            if !FileManager.default.fileExists(atPath: file.path) {   // save the originals once
+                var saved: [String: Any] = [:]
+                for d in trackpadDomains {
+                    if let v = CFPreferencesCopyAppValue(g.key as CFString, d as CFString) { saved[d] = v }
+                }
+                if let v = CFPreferencesCopyValue(g.globalKey as CFString, kCFPreferencesAnyApplication,
+                                                  kCFPreferencesCurrentUser, kCFPreferencesCurrentHost) { saved["global"] = v }
+                try? FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+                (saved as NSDictionary).write(to: file, atomically: true)
+            }
+            for d in trackpadDomains { shell("/usr/bin/defaults", "write", d, g.key, "-int", "0") }
+            shell("/usr/bin/defaults", "-currentHost", "write", "-g", g.globalKey, "-int", "0")
+        } else {
+            let saved = NSDictionary(contentsOf: file) as? [String: Any] ?? [:]
+            for d in trackpadDomains {
+                if let v = saved[d] as? Int { shell("/usr/bin/defaults", "write", d, g.key, "-int", "\(v)") }
+                else { shell("/usr/bin/defaults", "delete", d, g.key) }
+            }
+            if let v = saved["global"] as? Int { shell("/usr/bin/defaults", "-currentHost", "write", "-g", g.globalKey, "-int", "\(v)") }
+            else { shell("/usr/bin/defaults", "-currentHost", "delete", "-g", g.globalKey) }
+            try? FileManager.default.removeItem(at: file)
+        }
+        // Apply it now (no need to log out). Mission Control's swipes belong to the Dock, which only rereads
+        // them when it starts, so restart it too (the Mac Dock is tucked away; it comes straight back).
+        shell("/System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings", "-u")
+        if g.name != "swipe" { shell("/usr/bin/killall", "Dock") }
+        UserDefaults.standard.set(mute, forKey: g.mutedKey)
+        if g.name == "swipe" { UserDefaults.standard.set(mute, forKey: "notificationSwipeMuted") }
+        MainActor.assumeIsolated { Supervisor.shared.log("trackpad \(g.name) \(mute ? "turned off" : "back on")") }
+    }
+
+    /// Keep them in step with the settings.
+    @MainActor static func syncNotificationSwipe() {
+        CFPreferencesAppSynchronize(BugOSID.dock as CFString)
+        func dock<T>(_ k: String, _ d: T) -> T { CFPreferencesCopyAppValue(k as CFString, BugOSID.dock as CFString) as? T ?? d }
+        let gestureOn = Part.dock.enabled && dock(QuickCornerCatalog.gestureKey, true)   // Quick Access
+        // The gesture is Notification Center's old spot, so that swipe is off while it's on. Mission Control's
+        // swipes are never touched any more (1.2 betas moved them; put them back).
+        let wantNC = gestureOn
+        if wantNC != isMuted(notificationSwipe) { setMuted(notificationSwipe, wantNC) }
+        for g in [threeFingerVertical, fourFingerVertical] where isMuted(g) { setMuted(g, false) }
+    }
+
+    /// Uninstall: every trackpad gesture back how it was.
+    static func restoreTrackpadGestures() {
+        for g in [notificationSwipe, threeFingerVertical, fourFingerVertical] where isMuted(g) || FileManager.default.fileExists(atPath: g.restoreFile.path) {
+            setMuted(g, false)
+        }
+        if FileManager.default.fileExists(atPath: stateDir.appendingPathComponent("restore-swipe.plist").path) { setMuted(notificationSwipe, false) }
     }
 
     // MARK: Folders
@@ -173,6 +256,7 @@ enum SystemChanges {
             setSystemFolderHandler(explorer: false) { done = true }
             for _ in 0..<60 where !done { pump(0.05) }
         }
+        restoreTrackpadGestures()
         setStartsAtLogin(false)
         // Permission entries in System Settings go too.
         for id in [BugOSID.os, BugOSID.dock, BugOSID.explorer, BugOSID.squiggle] { shell("/usr/bin/tccutil", "reset", "All", id) }

@@ -180,6 +180,7 @@ final class Supervisor {
             // The Mac Dock is only tucked away to make room for the taskbar.
             if on { start(.dock); if !SystemChanges.dockTucked { SystemChanges.setDockTucked(true) } }
             else { stop(.dock); if SystemChanges.dockTucked { SystemChanges.setDockTucked(false) } }
+            SystemChanges.syncNotificationSwipe()   // the gesture lives in the taskbar
         case .explorer:
             if on {
                 start(.explorer, args: ["--background"])

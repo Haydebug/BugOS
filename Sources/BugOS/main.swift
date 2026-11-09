@@ -14,7 +14,7 @@
 //   BugOS --login              started at login (LaunchAgent com.bugos.os): parts only, the page only if
 //                              a permission is missing
 //   BugOS --setup              show the page at Permissions
-//   BugOS --page <section>     show the page at general | features | permissions | taskbar | quickCorner | explorer | squiggle
+//   BugOS --page <section>     show the page at general | features | permissions | taskbar | quickCorner | quickAccess | explorer | squiggle
 //   BugOS --start <part>       start dock | explorer | squiggle (the parts use this to hand themselves over)
 //   BugOS --open <paths…>      open folders in File Explorer
 //   BugOS --restart <part>     restart one part (./build.sh update uses this)
@@ -87,6 +87,7 @@ final class BugOSDelegate: NSObject, NSApplicationDelegate {
         sup.log("BugOS \(SystemChanges.version) started (\(r.cmd))")
         Updater.shared.onNewVersion = { [weak self] in self?.showPage(.general) }
         Updater.shared.startAutomaticChecks()
+        SystemChanges.syncNotificationSwipe()
         // Every launch starts all three parts; File Explorer quietly (hotkey, folder opening) unless it
         // was asked for.
         sup.start(.dock)

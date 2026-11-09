@@ -49,7 +49,7 @@ part_info() {  # <part> -> "bundle-name|executable|plist|icon|identifier"
   case "$1" in
     dock)     echo "BugDock.app|BugDock|BugDock-Info.plist||com.bugos.dock" ;;
     explorer) echo "File Explorer.app|BugExplorer|FileExplorer-Info.plist|FileExplorer.icns|com.bugos.explorer" ;;
-    squiggle) echo "Squiggle.app|Squiggle|Squiggle-Info.plist||com.bugos.squiggle" ;;
+    squiggle) echo "Squiggle.app|Squiggle|Squiggle-Info.plist|Squiggle.icns|com.bugos.squiggle" ;;
     *) echo "unknown part: $1 (dock | explorer | squiggle | bugos)" >&2; exit 2 ;;
   esac
 }
@@ -105,7 +105,9 @@ installed() {
 
 install_here() {
   local dest; dest=$(installed); dest=${dest:-"/Applications/BugOS.app"}
-  if [[ -x "$dest/Contents/MacOS/BugOS" ]]; then "$dest/Contents/MacOS/BugOS" --quit || true; sleep 1; fi
+  if [[ -x "$dest/Contents/MacOS/BugOS" ]]; then "$dest/Contents/MacOS/BugOS" --quit || true; fi
+  # Wait for the old BugOS to be gone, or the new one hands itself to it and exits.
+  for _ in $(seq 50); do pgrep -xq BugOS || break; sleep 0.2; done
   rm -rf "$dest"
   # Before 1.1 the app was called "Bug OS.app": install as BugOS.app next to where it was.
   if [[ "$(basename "$dest")" == "Bug OS.app" ]]; then
@@ -124,7 +126,8 @@ update_part() {
   compile
   local bugos="$dest/Contents/MacOS/BugOS"
   if [[ "$1" == bugos ]]; then
-    "$bugos" --quit || true; sleep 1
+    "$bugos" --quit || true
+    for _ in $(seq 50); do pgrep -xq BugOS || break; sleep 0.2; done
     build_launcher "$dest"
   else
     build_part "$1" "$dest"

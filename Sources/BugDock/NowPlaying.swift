@@ -71,6 +71,23 @@ final class NowPlaying: ObservableObject {
         }
     }
 
+    /// A command for one particular player (the taskbar preview's buttons under Spotify or Music).
+    func send(_ command: Command, to bundleID: String) {
+        if command == .playPause && isPlaying && info?.bundleID == bundleID { holdUntil = Date().addingTimeInterval(5) }
+        queue.async { [weak self] in
+            PlayerScripts.send(command.rawValue, to: bundleID)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self?.poll()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self?.poll() }
+                }
+            }
+        }
+    }
+
+    /// Whether this player is the one playing right now.
+    func isPlaying(_ bundleID: String) -> Bool { info?.bundleID == bundleID && isPlaying }
+
     init() {
         timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }

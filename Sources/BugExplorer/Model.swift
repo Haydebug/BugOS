@@ -1,4 +1,5 @@
 import AppKit
+import BugOSKit
 import QuickLookThumbnailing
 
 // MARK: - Locations
@@ -123,12 +124,43 @@ enum Icons {
         let img: NSImage
         if url.path.hasPrefix("/Volumes/"), FS.isNetwork(url), FS.isDirectory(url), !isVolumeRoot(url) {
             img = NSWorkspace.shared.icon(for: .folder)
+        } else if let app = windowsStyleIcon(for: url) {
+            img = app
         } else {
             img = NSWorkspace.shared.icon(forFile: url.path)
         }
         img.size = NSSize(width: size, height: size)
         cache.setObject(img, forKey: key)
         return img
+    }
+
+    /// Windows-style file icons (BugOS › File Explorer › File icons, the default): a file shows the icon of the
+    /// app that opens it, like Explorer, instead of macOS 26's blank page with a tiny badge. Folders, apps
+    /// and other packages, and files nothing opens, keep their own icon. Looked up once per file type.
+    private static let appIconByType = NSCache<NSString, NSImage>()
+    private static var noAppTypes = Set<String>()
+    static var windowsStyle: Bool { UserDefaults.standard.string(forKey: ExplorerSetting.fileIcons) != "mac" }
+
+    private static func windowsStyleIcon(for url: URL) -> NSImage? {
+        guard windowsStyle else { return nil }
+        let v = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .contentTypeKey, .isAliasFileKey])
+        if v?.isDirectory == true || v?.isPackage == true || v?.isAliasFile == true { return nil }
+        let ext = url.pathExtension.lowercased()
+        guard !ext.isEmpty else { return nil }
+        let key = ext as NSString
+        if let i = appIconByType.object(forKey: key) { return i.copy() as? NSImage }
+        if noAppTypes.contains(ext) { return nil }
+        guard let app = NSWorkspace.shared.urlForApplication(toOpen: url) else { noAppTypes.insert(ext); return nil }
+        let icon = NSWorkspace.shared.icon(forFile: app.path)
+        appIconByType.setObject(icon, forKey: key)
+        return icon.copy() as? NSImage
+    }
+
+    /// The File icons setting changed: draw everything again.
+    static func reset() {
+        cache.removeAllObjects()
+        appIconByType.removeAllObjects()
+        noAppTypes = []
     }
 
     private static func isVolumeRoot(_ url: URL) -> Bool {

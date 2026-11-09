@@ -1,4 +1,5 @@
 import AppKit
+import BugOSKit
 
 enum Places {
     /// Mounted volumes the user cares about (startup disk first), no system snapshots.
@@ -27,7 +28,7 @@ enum Places {
 
 /// A row in the navigation pane.
 final class NavNode {
-    enum Kind { case home, thisMac, network, pinned, folder, volume, separator, iCloud, recycleBin }
+    enum Kind { case home, thisMac, network, pinned, folder, volume, separator, iCloud, recycleBin, applications }
     let kind: Kind
     let url: URL?
     let title: String
@@ -54,6 +55,7 @@ final class NavNode {
         case .network: return symbol("network", size: 13)
         case .iCloud: return symbol("icloud.fill", size: 13)
         case .recycleBin: return symbol("trash", size: 13)
+        case .applications: return symbol("square.grid.3x3.fill", size: 12)
         case .separator: return nil
         default: return url.map { Icons.icon(for: $0, size: 16) }
         }
@@ -116,6 +118,7 @@ final class NavPane: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         reload()
         NotificationCenter.default.addObserver(self, selector: #selector(reload), name: .pinsChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(reload), name: .settingsChanged, object: nil)
         let ws = NSWorkspace.shared.notificationCenter
         ws.addObserver(self, selector: #selector(reload), name: NSWorkspace.didMountNotification, object: nil)
         ws.addObserver(self, selector: #selector(reload), name: NSWorkspace.didUnmountNotification, object: nil)
@@ -128,23 +131,38 @@ final class NavPane: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     }
 
     @objc func reload() {
-        var r: [NavNode] = [NavNode(.home, title: "Home")]
-        if let ic = Places.iCloud { r.append(NavNode(.iCloud, url: ic, title: "iCloud Drive", expandable: true)) }
-        r.append(NavNode(.separator, title: ""))
-        for u in Settings.shared.pinned where FS.exists(u) {
-            r.append(NavNode(.pinned, url: u, title: FS.displayName(u), expandable: true))
-        }
-        r.append(NavNode(.separator, title: ""))
+        // Sections you can hide in BugOS › File Explorer › Navigation pane (all shown by default).
+        let hidden = Set(UserDefaults.standard.stringArray(forKey: ExplorerSetting.navHidden) ?? [])
+        func on(_ id: String) -> Bool { !hidden.contains(id) }
         let mac = NavNode(.thisMac, title: "This Mac", expandable: true)
-        r.append(mac)
-        if !Places.networkVolumes.isEmpty { r.append(NavNode(.network, title: "Network", expandable: true)) }
-        r.append(NavNode(.separator, title: ""))
-        r.append(NavNode(.recycleBin, url: RecycleBin.url, title: "Recycle Bin"))
+        // Sections in your order; a divider wherever the kind of section changes.
+        var groups: [(kind: String, nodes: [NavNode])] = []
+        func add(_ kind: String, _ nodes: [NavNode]) {
+            guard !nodes.isEmpty else { return }
+            if groups.last?.kind == kind { groups[groups.count - 1].nodes += nodes } else { groups.append((kind, nodes)) }
+        }
+        for sec in ExplorerSetting.orderedNavSections(UserDefaults.standard.stringArray(forKey: ExplorerSetting.navOrder)) where on(sec.id) {
+            switch sec.id {
+            case "home": add("places", [NavNode(.home, title: "Home")])
+            case "applications": add("places", [NavNode(.applications, url: URL(fileURLWithPath: "/Applications"), title: "Applications", expandable: true)])
+            case "icloud": if let ic = Places.iCloud { add("places", [NavNode(.iCloud, url: ic, title: "iCloud Drive", expandable: true)]) }
+            case "quickAccess": add("pins", Settings.shared.pinned.filter(FS.exists).map { NavNode(.pinned, url: $0, title: FS.displayName($0), expandable: true) })
+            case "thisMac": add("drives", [mac])
+            case "network": if !Places.networkVolumes.isEmpty { add("drives", [NavNode(.network, title: "Network", expandable: true)]) }
+            case "recycleBin": add("bin", [NavNode(.recycleBin, url: RecycleBin.url, title: "Recycle Bin")])
+            default: break
+            }
+        }
+        var r: [NavNode] = []
+        for g in groups {
+            if !r.isEmpty { r.append(NavNode(.separator, title: "")) }
+            r += g.nodes
+        }
         // Keep "This Mac" open across reloads.
         let wasExpanded = roots.first { $0.kind == .thisMac }.map { outline.isItemExpanded($0) } ?? true
         roots = r
         outline.reloadData()
-        if wasExpanded { outline.expandItem(mac) }
+        if wasExpanded, on("thisMac") { outline.expandItem(mac) }
     }
 
     /// Highlight the row for the current location if it's a top-level place.
@@ -187,7 +205,7 @@ final class NavPane: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
         let cell = NSTableCellView()
         let iv = NSImageView(); iv.image = n.icon; iv.contentTintColor = n.kind == .home ? .systemOrange : .secondaryLabelColor
-        if n.kind == .iCloud { iv.contentTintColor = .systemBlue }
+        if n.kind == .iCloud || n.kind == .applications { iv.contentTintColor = .systemBlue }
         let tf = NSTextField(labelWithString: n.title)
         tf.lineBreakMode = .byTruncatingTail
         tf.font = .systemFont(ofSize: 13)

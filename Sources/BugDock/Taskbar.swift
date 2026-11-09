@@ -49,36 +49,39 @@ final class TaskbarController: ObservableObject {
     @Published var style = BarStyle()
     /// Button frames in bar-view coordinates (top-left origin), for right-click hit testing.
     var itemFrames: [String: CGRect] = [:]
-    /// BugDock's settings live in a menu-bar icon (the Start button was removed).
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    private let settingsDelegate = SettingsMenuDelegate()
 
     init(tracker: WindowTracker) {
         self.tracker = tracker
         // The BugOS page changed a setting: pick it up now.
-        DistributedNotificationCenter.default().addObserver(forName: BugOSID.dockSettingsChanged, object: nil, queue: .main) { [weak self] _ in
+        // Its settings live on the BugOS page (there's no menu-bar icon); the page also sends commands here.
+        DistributedNotificationCenter.default().addObserver(forName: BugOSID.dockSettingsChanged, object: nil, queue: .main) { [weak self] n in
+            let command = n.object as? String
             MainActor.assumeIsolated {
+                switch command {
+                case "pause": QuickAccessHotkey.unregister(); return   // the page is recording a shortcut
+                case "spotify:connect": SpotifyAuth.shared.connect(); return
+                case "spotify:disconnect": SpotifyAuth.shared.disconnect(); return
+                case "allapps": self?.startMenu.open(); return
+                case "quickcorner": self?.quickCorner.open(); return
+                case "quickpanel": self?.quickCorner.side.open(); return
+                default: break
+                }
                 CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
+                QuickAccessHotkey.reload()
                 self?.tracker.reloadSettings()
                 self?.style = BarStyle()
                 self?.layout()
             }
         }
+        AppHistory.shared.start()   // for Quick Access's "Recent"
+        QuickAccessHotkey.corner = quickCorner
+        QuickAccessHotkey.reload()
+        // Every space, but hidden by Mission Control / Exposé (macOS does that for "transient" windows).
+        panel.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
         let root = TaskbarView(tracker: tracker, bar: self, nowPlaying: nowPlaying, style: self)
         let host = BarHostingView(rootView: root)
         host.bar = self
         panel.contentView = host
-        if let button = statusItem.button {
-            let img = NSImage(systemSymbolName: "dock.rectangle", accessibilityDescription: "BugDock")
-            img?.isTemplate = true
-            button.image = img
-            button.toolTip = "BugDock"
-        }
-        let settings = NSMenu()
-        settings.autoenablesItems = false
-        settingsDelegate.bar = self
-        settings.delegate = settingsDelegate   // rebuilt each time it opens, so checkmarks are current
-        statusItem.menu = settings
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.layout() }
@@ -90,6 +93,58 @@ final class TaskbarController: ObservableObject {
     func show() {
         layout()
         panel.orderFrontRegardless()
+        watchFullScreen()
+    }
+
+    // MARK: Full-screen apps
+
+    /// Like Windows: while the app in front is full screen on the bar's screen, the taskbar and the quick
+    /// corner get out of the way, and come back when you leave full screen.
+    private(set) var hiddenForFullScreen = false
+    private var fullScreenTimer: Timer?
+
+    private func watchFullScreen() {
+        let nc = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
+            nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.checkFullScreen()
+                    // A space switch finishes animating a moment later.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self?.checkFullScreen() }
+                }
+            }
+        }
+        // Also catches an app going full screen without switching apps (the green button, a video).
+        fullScreenTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkFullScreen() }
+        }
+    }
+
+    private var frontIsFullScreen: Bool {
+        guard let front = NSWorkspace.shared.frontmostApplication,
+              front.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let w = WindowReader.focusedWindow(pid: front.processIdentifier),
+              AX.bool(w, "AXFullScreen") == true else { return false }
+        // Only if it's full screen on the bar's screen (AX frames are top-left based on the main screen).
+        guard let f = AX.frame(w) else { return true }
+        let mainH = NSScreen.screens.first?.frame.height ?? 0
+        let cocoa = CGRect(x: f.minX, y: mainH - f.maxY, width: f.width, height: f.height)
+        return screen.frame.intersects(cocoa.insetBy(dx: 2, dy: 2))
+    }
+
+    func checkFullScreen() {
+        let full = frontIsFullScreen
+        guard full != hiddenForFullScreen else { return }
+        hiddenForFullScreen = full
+        if full {
+            preview.hide()
+            startMenu.close()
+            quickCorner.close()
+            panel.orderOut(nil)
+        } else {
+            panel.orderFrontRegardless()
+        }
+        quickCorner.layout()
     }
 
     func layout() {
@@ -167,40 +222,6 @@ final class TaskbarController: ObservableObject {
         return m
     }
 
-    func fillSettings(_ m: NSMenu) {
-        m.addItem(MenuAction("All apps") { [weak self] in self?.startMenu.open() })
-        m.addItem(.separator())
-        m.addItem(MenuAction("Show apps with no open windows", checked: tracker.showWindowlessApps) { [weak self] in
-            guard let t = self?.tracker else { return }
-            t.showWindowlessApps.toggle()
-        })
-        let peekItem = NSMenuItem(title: "Peek strength", action: nil, keyEquivalent: "")
-        let peekMenu = NSMenu()
-        peekMenu.autoenablesItems = false
-        for (label, value) in [("Light 30%", 0.3), ("Medium 50%", 0.5), ("Strong 75%", 0.75), ("Full 100%", 1.0)] {
-            peekMenu.addItem(MenuAction(label, checked: abs(PeekController.strength - value) < 0.01) {
-                PeekController.strength = value
-            })
-        }
-        peekItem.submenu = peekMenu
-        m.addItem(peekItem)
-        m.addItem(MenuAction("Keep windows above the taskbar", checked: tracker.fitter.isEnabled) { [weak self] in
-            guard let f = self?.tracker.fitter else { return }
-            f.isEnabled.toggle()
-        })
-        // Only with your own Spotify app's client id set (none is built in).
-        if SpotifyAuth.shared.isConnected {
-            m.addItem(MenuAction("Disconnect Spotify") { SpotifyAuth.shared.disconnect() })
-        } else if SpotifyAuth.isAvailable {
-            m.addItem(MenuAction("Connect Spotify…") { SpotifyAuth.shared.connect() })
-        }
-        m.addItem(MenuAction("Quick corner (bottom-right)", checked: QuickCornerController.isEnabled) { [weak self] in
-            QuickCornerController.isEnabled.toggle()
-            self?.quickCorner.layout()
-        })
-        m.addItem(.separator())
-        m.addItem(MenuAction("Quit BugDock") { NSApp.terminate(nil) })
-    }
 }
 
 struct TaskbarView: View {
@@ -414,17 +435,6 @@ final class MenuAction: NSMenuItem {
     }
     required init(coder: NSCoder) { fatalError() }
     @objc private func fire() { handler() }
-}
-
-/// Rebuilds the menu-bar settings menu each time it opens.
-final class SettingsMenuDelegate: NSObject, NSMenuDelegate {
-    weak var bar: TaskbarController?
-    nonisolated func menuNeedsUpdate(_ menu: NSMenu) {
-        MainActor.assumeIsolated {
-            menu.removeAllItems()
-            bar?.fillSettings(menu)
-        }
-    }
 }
 
 /// "Change icon…": pick any image file to use as an app's icon on the bar.

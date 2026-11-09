@@ -33,7 +33,6 @@ func displayIndex(of screen: NSScreen) -> Int {
 let escapeHotKeyID: UInt32 = 99
 
 final class App: NSObject, NSApplicationDelegate {
-    var statusItem: NSStatusItem!
     var editors: [EditorWindow] = []
     var videoEditors: [VideoEditorWindow] = []
     var session: CaptureSession?
@@ -57,41 +56,23 @@ final class App: NSObject, NSApplicationDelegate {
     /// Each action's shortcuts (BugOS › Squiggle › Shortcuts).
     var shortcuts: [String: [Shortcut]] = [:]
     var hotKeyHandlerInstalled = false
+    var freezing = false
 
     func applicationDidFinishLaunching(_ n: Notification) {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "scribble.variable", accessibilityDescription: "Squiggle")
-        registerHotKeys()
-        buildMenu()
+        registerHotKeys()   // no menu-bar icon: shortcuts, the quick corner and the BugOS page start everything
         // The BugOS page changed a Squiggle setting.
         DistributedNotificationCenter.default().addObserver(forName: BugOSID.squiggleSettingsChanged, object: nil, queue: .main) { [weak self] n in
             CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
             // "pause": the page is recording a new shortcut, so let every key through until it's done.
-            if n.object as? String == "pause" { self?.unregisterHotKeys(); return }
+            switch n.object as? String {
+            case "pause": self?.unregisterHotKeys(); return       // the page is recording a new shortcut
+            case "openVideo": self?.menuOpenVideo(); return       // BugOS › Squiggle › Draw on a Recording…
+            case "snip": self?.menuSelector(); return
+            default: break
+            }
             self?.registerHotKeys()
-            self?.buildMenu()
         }
         log("started")
-    }
-
-    func buildMenu() {
-        let menu = NSMenu()
-        func item(_ t: String, _ a: Selector) { menu.addItem(withTitle: t, action: a, keyEquivalent: "").target = self }
-        func label(_ t: String, _ id: String) -> String {
-            guard let k = shortcuts[id]?.first else { return t }
-            return "\(t)  (\(k.display))"
-        }
-        item(label("Snip or Record…", "selector"), #selector(menuSelector))
-        item(label("Record Area", "record"), #selector(menuRecord))
-        item(label("Snip Area", "area"), #selector(menuArea))
-        item(label("Snip & Draw In Place", "drawInPlace"), #selector(menuDrawInPlace))
-        item(label("Snip Full Screen", "fullScreen"), #selector(menuFull))
-        menu.addItem(.separator())
-        item("Draw on a Recording…", #selector(menuOpenVideo))
-        item("Open Screenshots Folder", #selector(openFolder))
-        menu.addItem(.separator())
-        item("Quit Squiggle", #selector(quit))
-        statusItem.menu = menu
     }
 
     // MARK: Hotkeys
@@ -164,12 +145,26 @@ final class App: NSObject, NSApplicationDelegate {
     func showSelector(mode: CaptureMode = .snip, showBar: Bool = true, editInPlace: Bool = false) {
         if let s = session { s.end(); return }
         guard !capturing, recorder == nil || showBar else { return }
+        guard !freezing else { return }
+        // Freeze the screen first, before Squiggle takes focus (which would close menus and hover effects).
+        freezing = true
+        FrozenScreens.capture { [weak self] frozen in
+            self?.freezing = false
+            self?.beginSelector(mode: mode, showBar: showBar, editInPlace: editInPlace, frozen: frozen)
+        }
+    }
+
+    private func beginSelector(mode: CaptureMode, showBar: Bool, editInPlace: Bool, frozen: FrozenScreens) {
+        guard session == nil else { return }
         let s = CaptureSession()
+        s.frozen = frozen
         s.mode = mode
         s.showBar = showBar
         s.onEnd = { [weak self] in self?.setEscapeGrab(false); self?.session = nil }
         s.onTarget = { [weak self] mode, target in
-            // let the overlay disappear before grabbing pixels
+            // A snip comes straight from the frozen screens; without them (no permission yet), or for a
+            // recording, wait for the overlay to go before grabbing live pixels.
+            if mode == .snip, let self, self.snipFrozen(target, frozen: frozen, editInPlace: editInPlace) { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
                 if mode == .snip { self?.snip(target, editInPlace: editInPlace) } else { self?.record(target) }
             }
@@ -240,6 +235,20 @@ final class App: NSObject, NSApplicationDelegate {
         do { try p.run() } catch { capturing = false; log("screencapture failed: \(error)") }
     }
 
+    /// The picked area, window or screen, cut from the frozen screens. False if there's no frozen picture.
+    func snipFrozen(_ target: CaptureTarget, frozen: FrozenScreens, editInPlace: Bool) -> Bool {
+        let cg: CGImage?, screen: NSScreen, placeAt: NSRect?
+        switch target {
+        case .rect(let r, let scr): cg = frozen.crop(r, on: scr); screen = scr; placeAt = r
+        case .window(_, let r, let scr): cg = frozen.crop(r, on: scr); screen = scr; placeAt = r
+        case .screen(let scr): cg = frozen.image(for: scr); screen = scr; placeAt = nil
+        }
+        guard let cg else { return false }
+        let size = NSSize(width: CGFloat(cg.width) / screen.backingScaleFactor, height: CGFloat(cg.height) / screen.backingScaleFactor)
+        snipped(cg: cg, size: size, screen: screen, editAt: editInPlace ? (placeAt ?? screen.frame) : nil)
+        return true
+    }
+
     func snipped(url: URL, screen: NSScreen, editAt: NSRect? = nil) {
         defer { try? FileManager.default.removeItem(at: url) }
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
@@ -248,6 +257,11 @@ final class App: NSObject, NSApplicationDelegate {
         let dpi = (props?[kCGImagePropertyDPIWidth] as? Double) ?? 72
         let s = CGFloat(dpi / 72)
         let size = NSSize(width: CGFloat(cg.width) / s, height: CGFloat(cg.height) / s)
+        snipped(cg: cg, size: size, screen: screen, editAt: editAt)
+    }
+
+    /// A snip: copied straight away, then the corner thumbnail (or the editor in place).
+    func snipped(cg: CGImage, size: NSSize, screen: NSScreen, editAt: NSRect? = nil) {
 
         let rep = NSBitmapImageRep(cgImage: cg)
         rep.size = size

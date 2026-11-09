@@ -19,7 +19,8 @@ final class SpotifyAuth: ObservableObject {
     static let redirectURI = "http://127.0.0.1:43821/callback"   // loopback literal, http allowed by Spotify
     static let scopes = "user-library-read user-library-modify"
 
-    @Published private(set) var isConnected: Bool
+    /// Also saved as "spotifyConnected" so the BugOS page can show it.
+    @Published private(set) var isConnected: Bool { didSet { UserDefaults.standard.set(isConnected, forKey: "spotifyConnected") } }
 
     private var accessToken: String?
     private var expiresAt = Date.distantPast
@@ -30,6 +31,7 @@ final class SpotifyAuth: ObservableObject {
 
     private init() {
         isConnected = SpotifyKeychain.read() != nil
+        UserDefaults.standard.set(isConnected, forKey: "spotifyConnected")   // didSet doesn't run in init
     }
 
     // MARK: Connect / disconnect

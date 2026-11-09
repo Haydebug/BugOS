@@ -22,6 +22,10 @@ struct PartPrefs {
     }
     /// Ask the part to drop (or bring back) its global shortcuts, so recording a new one isn't
     /// swallowed by the old one.
+    /// Ask the running part to do something (e.g. "spotify:connect").
+    func command(_ c: String) {
+        DistributedNotificationCenter.default().postNotificationName(changed, object: c, userInfo: nil, deliverImmediately: true)
+    }
     func pauseShortcuts(_ paused: Bool) {
         DistributedNotificationCenter.default().postNotificationName(changed, object: paused ? "pause" : nil,
                                                                      userInfo: nil, deliverImmediately: true)
@@ -36,7 +40,7 @@ let explorerPrefs = PartPrefs(domain: BugOSID.explorer, changed: BugOSID.explore
 let squigglePrefs = PartPrefs(domain: BugOSID.squiggle, changed: BugOSID.squiggleSettingsChanged)
 
 enum PageSection: String, CaseIterable, Identifiable {
-    case general, features, permissions, taskbar, quickCorner, explorer, squiggle
+    case general, features, permissions, taskbar, quickCorner, quickAccess, explorer, squiggle
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -46,6 +50,7 @@ enum PageSection: String, CaseIterable, Identifiable {
         case .permissions: "Permissions"
         case .taskbar: "Taskbar"
         case .quickCorner: "Quick Corner"
+        case .quickAccess: "Quick Access"
         case .explorer: "File Explorer"
         }
     }
@@ -57,6 +62,7 @@ enum PageSection: String, CaseIterable, Identifiable {
         case .permissions: "lock.shield"
         case .taskbar: "dock.rectangle"
         case .quickCorner: "square.stack.3d.up"
+        case .quickAccess: "hand.draw"
         case .explorer: "folder"
         }
     }
@@ -131,6 +137,7 @@ struct PageView: View {
                         case .permissions: PermissionsSection(model: model)
                         case .taskbar: TaskbarSection()
                         case .quickCorner: QuickCornerSection()
+                        case .quickAccess: QuickAccessSection()
                         case .explorer: ExplorerSection()
                         case .features: FeaturesSection()
                         case .squiggle: SquiggleSection()
@@ -426,6 +433,8 @@ struct PermRow: View {
 struct TaskbarSection: View {
     @State private var peek: Double = dockPrefs.value("peekStrength", default: 0.5)
     @State private var spotifyID: String = dockPrefs.value(DockSetting.spotifyClientID, default: "")
+    @State private var spotifyOn: Bool = dockPrefs.value("spotifyConnected", default: false)
+    private let spotifyTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
     @State private var size: String = dockPrefs.value(DockSetting.barSize, default: "medium")
     @State private var align: String = dockPrefs.value(DockSetting.barAlignment, default: "center")
     @State private var background: String = dockPrefs.value(DockSetting.barBackground, default: "clear")
@@ -506,7 +515,7 @@ struct TaskbarSection: View {
                 }
                 .padding(.horizontal, 14).padding(.vertical, 10)
             }
-            SettingsGroup(footer: "Optional. To like songs from the taskbar, create an app at developer.spotify.com with the redirect URI http://127.0.0.1:43821/callback and paste its client id here. Then right-click the taskbar's menu-bar icon › Connect Spotify.") {
+            SettingsGroup(footer: "Optional. To like songs from the taskbar, create an app at developer.spotify.com with the redirect URI http://127.0.0.1:43821/callback, paste its client id here, then click Connect.") {
                 HStack {
                     Text("Spotify client id").font(.system(size: 13))
                     Spacer()
@@ -515,6 +524,21 @@ struct TaskbarSection: View {
                         dockPrefs.set(DockSetting.spotifyClientID, spotifyID.isEmpty ? nil : spotifyID)
                     }))
                     .textFieldStyle(.roundedBorder).frame(width: 280)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                RowDivider()
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Spotify account").font(.system(size: 13))
+                        Text(spotifyOn ? "Connected: the heart on the taskbar likes songs." : "Not connected.")
+                            .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if spotifyOn {
+                        Button("Disconnect") { dockPrefs.command("spotify:disconnect"); spotifyOn = false }
+                    } else {
+                        Button("Connect…") { dockPrefs.command("spotify:connect") }.disabled(spotifyID.isEmpty)
+                    }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 10)
             }
@@ -529,30 +553,128 @@ struct TaskbarSection: View {
                 }
             }
         }
+        .onReceive(spotifyTimer) { _ in spotifyOn = dockPrefs.value("spotifyConnected", default: false) }   // after you sign in
     }
 }
 
 struct QuickCornerSection: View {
-    @State private var apps: [String] = dockPrefs.value(QuickCornerCatalog.appsKey, default: [String]())
-    /// Top of the fan first (the stored order is nearest-the-corner first).
-    @State private var shown: [QuickCornerCatalog.Entry] = []
-    @State private var hidden: Set<String> = Set(dockPrefs.value(QuickCornerCatalog.hiddenKey, default: [String]()))
     @State private var enabled: Bool = dockPrefs.value("quickCornerEnabled", default: true)
-
-    private func load() {
-        shown = QuickCornerCatalog.ordered(dockPrefs.value(QuickCornerCatalog.orderKey, default: nil as [String]?), apps: apps).reversed()
-    }
-    private func saveOrder() { dockPrefs.set(QuickCornerCatalog.orderKey, shown.reversed().map(\.id)) }
+    @State private var tile: String? = dockPrefs.value(QuickCornerCatalog.tileColorKey, default: nil as String?)
+    @State private var glyph: String? = dockPrefs.value(QuickCornerCatalog.iconColorKey, default: nil as String?)
+    @State private var curve: Double = dockPrefs.value(QuickCornerCatalog.curveKey, default: 1.0)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             PartOffBanner(part: .dock)
-            SettingsGroup(footer: "Rest the pointer in the bottom-right corner of the screen and these shortcuts fan up from it.") {
+            SettingsGroup(footer: "Rest the pointer in the bottom-right corner of the screen and these shortcuts fan up from it. (The trackpad swipe has its own list: Quick Access.)") {
                 ToggleRow(title: "Quick corner", isOn: Binding(get: { enabled }, set: {
-                    enabled = $0; dockPrefs.set("quickCornerEnabled", $0)
+                    enabled = $0; dockPrefs.set("quickCornerEnabled", $0); SystemChanges.syncNotificationSwipe()
                 }))
             }
-            SettingsGroup(footer: "Laid out like the fan: the top of the list is the top of the fan, the bottom sits in the corner. Drag to reorder, untick to hide, + to add any app.") {
+            SettingsGroup(footer: "The shortcut you point at is outlined in your accent colour (General › Accent colour). Colours apply to Quick Access too.") {
+                SliderRow(title: "Curve", value: Binding(get: { curve }, set: {
+                    curve = $0; dockPrefs.set(QuickCornerCatalog.curveKey, $0)
+                }), range: 0...2, step: 0.25, format: { $0 < 0.01 ? "Straight" : $0 < 0.9 ? "Gentle" : $0 < 1.1 ? "Curved" : "Very curved" })
+                RowDivider()
+                ColorRow(title: "Tile colour", noneLabel: "Glass", defaultColor: Color(white: 0.25),
+                         hex: Binding(get: { tile }, set: { tile = $0; dockPrefs.set(QuickCornerCatalog.tileColorKey, $0) }))
+                RowDivider()
+                ColorRow(title: "Icon colour", noneLabel: "White", defaultColor: .white,
+                         hex: Binding(get: { glyph }, set: { glyph = $0; dockPrefs.set(QuickCornerCatalog.iconColorKey, $0) }))
+            }
+            .disabled(!enabled).opacity(enabled ? 1 : 0.5)
+            ShortcutListEditor(list: QuickCornerCatalog.corner, what: "the fan",
+                               footer: "Laid out like the fan: the top of the list is the top of the fan, the bottom sits in the corner. Drag to reorder, untick to hide, + to add any app, file or folder.")
+                .disabled(!enabled).opacity(enabled ? 1 : 0.5)
+            ShortcutAppsGroup()
+            HStack {
+                Spacer()
+                Button("Reset look") {
+                    for k in [QuickCornerCatalog.tileColorKey, QuickCornerCatalog.iconColorKey, QuickCornerCatalog.curveKey] { dockPrefs.set(k, nil) }
+                    tile = nil; glyph = nil; curve = 1
+                }
+            }
+        }
+    }
+}
+
+struct QuickAccessSection: View {
+    @State private var gesture: Bool = dockPrefs.value(QuickCornerCatalog.gestureKey, default: true)
+    @State private var shortcut: Shortcut? = Shortcut(stored: dockPrefs.value(QuickCornerCatalog.accessShortcutKey, default: ""))
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            PartOffBanner(part: .dock)
+            SettingsGroup(footer: "Swipe two fingers in from the right edge of the trackpad, where Notification Center's swipe was (BugOS turns that one off while this is on; Notification Center still opens from the clock). Your shortcuts slide in from the right side of the screen: slide down to pick one and lift to open it, or swipe back out to the edge to close them.") {
+                ToggleRow(title: "Trackpad swipe", detail: "Two fingers in from the right edge of the trackpad.",
+                          isOn: Binding(get: { gesture }, set: { gesture = $0; dockPrefs.set(QuickCornerCatalog.gestureKey, $0); SystemChanges.syncNotificationSwipe() }))
+            }
+            SettingsGroup(footer: "Opens Quick Access from anywhere. Then ↑ ↓ to pick, Return to open, Esc to close. None until you set one.") {
+                ShortcutRow(title: "Keyboard shortcut", detail: "Press it again to close Quick Access.",
+                            shortcuts: Binding(get: { shortcut.map { [$0] } ?? [] }, set: { list in
+                                shortcut = list.last
+                                dockPrefs.set(QuickCornerCatalog.accessShortcutKey, shortcut?.stored)
+                            }), defaults: [], single: true, prefs: dockPrefs)
+            }
+            ShortcutListEditor(list: QuickCornerCatalog.access, what: "Quick Access",
+                               footer: "Its own list, separate from the quick corner's: top to bottom as it appears. Drag to reorder, untick to hide, + to add any app, file or folder.")
+            ShortcutAppsGroup()
+        }
+    }
+}
+
+/// Which apps the Music and AI shortcuts open (shared by the quick corner and Quick Access).
+struct ShortcutAppsGroup: View {
+    @State private var musicApp: String = dockPrefs.value(QuickCornerCatalog.musicAppKey, default: "com.spotify.client")
+    @State private var aiApp: String = dockPrefs.value(QuickCornerCatalog.aiAppKey, default: "com.anthropic.claudefordesktop")
+    @State private var browser: String = dockPrefs.value(QuickCornerCatalog.browserAppKey, default: "default")
+    /// "Default" plus the browsers on this Mac (and the chosen one, even if it's gone).
+    private var browserOptions: [(String, String)] {
+        let installed = QuickCornerCatalog.browsers.filter {
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0.id) != nil || $0.id == browser
+        }
+        let def = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "https://example.com")!)
+            .map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") }
+        return [("default", def.map { "Default (\($0))" } ?? "Default")] + installed.map { ($0.id, $0.name) }
+    }
+    var body: some View {
+        SettingsGroup(footer: "The same in the quick corner and Quick Access.") {
+            PickerRow(title: "Music shortcut opens", selection: Binding(get: { musicApp }, set: {
+                musicApp = $0; dockPrefs.set(QuickCornerCatalog.musicAppKey, $0)
+            }), options: [("com.spotify.client", "Spotify"), ("com.apple.Music", "Apple Music")])
+            RowDivider()
+            PickerRow(title: "AI shortcut opens", selection: Binding(get: { aiApp }, set: {
+                aiApp = $0; dockPrefs.set(QuickCornerCatalog.aiAppKey, $0)
+            }), options: QuickCornerCatalog.aiApps.map { ($0.id, $0.name) })
+            RowDivider()
+            MenuPickerRow(title: "Browser shortcut opens", selection: Binding(get: { browser }, set: {
+                browser = $0; dockPrefs.set(QuickCornerCatalog.browserAppKey, $0)
+            }), options: browserOptions)
+        }
+    }
+}
+
+/// One list of shortcuts (the quick corner's or Quick Access's): order, show/hide, add and remove apps.
+/// Shown top first; stored bottom (nearest the corner) first.
+struct ShortcutListEditor: View {
+    let list: QuickCornerCatalog.List
+    let what: String
+    let footer: String
+    @State private var apps: [String] = []
+    @State private var shown: [QuickCornerCatalog.Entry] = []
+    @State private var hidden: Set<String> = []
+
+    private func load() {
+        apps = dockPrefs.value(list.apps, default: [String]())
+        hidden = Set(dockPrefs.value(list.hidden, default: list.defaultHidden))
+        shown = QuickCornerCatalog.ordered(dockPrefs.value(list.order, default: nil as [String]?), apps: apps,
+                                           defaultOrder: list.defaultOrder).reversed()
+    }
+    private func saveOrder() { dockPrefs.set(list.order, shown.reversed().map(\.id)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsGroup(footer: footer) {
                 List {
                     ForEach(shown) { e in
                         HStack(spacing: 10) {
@@ -570,7 +692,7 @@ struct QuickCornerSection: View {
                             }
                             Toggle("", isOn: Binding(get: { !hidden.contains(e.id) }, set: { show in
                                 if show { hidden.remove(e.id) } else { hidden.insert(e.id) }
-                                dockPrefs.set(QuickCornerCatalog.hiddenKey, Array(hidden))
+                                dockPrefs.set(list.hidden, Array(hidden))
                             }))
                             .labelsHidden()
                         }
@@ -581,15 +703,12 @@ struct QuickCornerSection: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .frame(height: CGFloat(shown.count) * 34 + 8)
-                .disabled(!enabled)
-                .opacity(enabled ? 1 : 0.5)
             }
             HStack {
-                Button { addApp() } label: { Label("Add App…", systemImage: "plus") }
+                Button { addApp() } label: { Label("Add…", systemImage: "plus") }
                 Spacer()
                 Button("Reset to default") {
-                    hidden = []; apps = []
-                    for k in [QuickCornerCatalog.orderKey, QuickCornerCatalog.hiddenKey, QuickCornerCatalog.appsKey] { dockPrefs.set(k, nil) }
+                    for k in [list.order, list.hidden, list.apps] { dockPrefs.set(k, nil) }
                     load()
                 }
             }
@@ -598,25 +717,28 @@ struct QuickCornerSection: View {
     }
 
     private func addApp() {
+        // Apps, files or folders: whatever you pick opens from here.
         let p = NSOpenPanel()
-        p.allowedContentTypes = [.application]
+        p.canChooseFiles = true
+        p.canChooseDirectories = true
+        p.treatsFilePackagesAsDirectories = false
         p.allowsMultipleSelection = true
         p.directoryURL = URL(fileURLWithPath: "/Applications")
-        p.prompt = "Add to Quick Corner"
+        p.message = "Choose apps, files or folders to add to \(what)."
+        p.prompt = "Add"
         guard p.runModal() == .OK else { return }
         let new = p.urls.map(\.path).filter { !apps.contains($0) }
         guard !new.isEmpty else { return }
         apps += new
-        dockPrefs.set(QuickCornerCatalog.appsKey, apps)
-        // New apps go at the top of the fan.
-        shown.insert(contentsOf: new.map(QuickCornerCatalog.appEntry), at: 0)
+        dockPrefs.set(list.apps, apps)
+        shown.insert(contentsOf: new.map(QuickCornerCatalog.appEntry), at: 0)   // new ones on top
         saveOrder()
     }
 
     private func remove(_ path: String) {
         apps.removeAll { $0 == path }
         shown.removeAll { $0.appPath == path }
-        dockPrefs.set(QuickCornerCatalog.appsKey, apps)
+        dockPrefs.set(list.apps, apps)
         saveOrder()
     }
 }
@@ -629,8 +751,13 @@ struct ExplorerSection: View {
     @State private var shortcut: Shortcut? = ExplorerSection.currentShortcut
     @State private var theme: String = explorerPrefs.value(ExplorerSetting.theme, default: "windows")
     @State private var appearance: String = explorerPrefs.value(ExplorerSetting.appearance, default: "system")
+    @State private var iconStyle: String = explorerPrefs.value(ExplorerSetting.iconStyle, default: "auto")
     @State private var glassTint: String? = explorerPrefs.value(ExplorerSetting.glassTint, default: nil as String?)
     @State private var tintStrength: Double = explorerPrefs.value(ExplorerSetting.glassTintStrength, default: 0.2)
+    @State private var navHidden: Set<String> = Set(explorerPrefs.value(ExplorerSetting.navHidden, default: [String]()))
+    @State private var navPane: Bool = explorerPrefs.value("showNavPane", default: true)
+    @State private var fileIcons: String = explorerPrefs.value(ExplorerSetting.fileIcons, default: "windows")
+    @State private var navOrder: [String] = ExplorerSetting.orderedNavSections(explorerPrefs.value(ExplorerSetting.navOrder, default: nil as [String]?)).map(\.id)
 
     static var currentShortcut: Shortcut? {
         guard let s: String = explorerPrefs.value(ExplorerSetting.newWindowShortcut, default: nil as String?) else {
@@ -669,6 +796,22 @@ struct ExplorerSection: View {
                 PickerRow(title: "Appearance", selection: Binding(get: { appearance }, set: {
                     appearance = $0; explorerPrefs.set(ExplorerSetting.appearance, $0)
                 }), options: [("system", "Auto"), ("light", "Light"), ("dark", "Dark")])
+                RowDivider()
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("App icon").font(.system(size: 13))
+                        Text("On the taskbar, the Dock and ⌘-Tab. Auto matches the appearance.")
+                            .font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 12)
+                    ForEach([("auto", "Auto"), ("light", "Light"), ("dark", "Dark")], id: \.0) { o in
+                        IconChoice(label: o.1, dark: o.0 == "dark" ? true : o.0 == "light" ? false : nil,
+                                   selected: iconStyle == o.0) {
+                            iconStyle = o.0; explorerPrefs.set(ExplorerSetting.iconStyle, o.0)
+                        }
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
                 RowDivider()
                 Group {
                     ColorRow(title: "Glass tint", detail: "A wash of colour over Mica or Liquid Glass.", noneLabel: "No tint",
@@ -718,25 +861,94 @@ struct ExplorerSection: View {
             }
             Text("Show").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
             SettingsGroup {
+                PickerRow(title: "File icons", detail: "Windows: the icon of the app that opens the file. Mac: macOS's document icons.",
+                          selection: Binding(get: { fileIcons }, set: { fileIcons = $0; explorerPrefs.set(ExplorerSetting.fileIcons, $0) }),
+                          options: [("windows", "Windows"), ("mac", "Mac")])
+                RowDivider()
                 ToggleRow(title: "File name extensions", isOn: explorerPrefs.binding("showExtensions", default: true))
                 RowDivider()
                 ToggleRow(title: "Hidden items", detail: "Files and folders whose names start with a dot.",
                           isOn: explorerPrefs.binding("showHidden", default: false))
                 RowDivider()
                 ToggleRow(title: "Item check boxes", isOn: explorerPrefs.binding("itemCheckBoxes", default: false))
-                RowDivider()
-                ToggleRow(title: "Navigation pane", detail: "Quick access, This Mac and your drives on the left.",
-                          isOn: explorerPrefs.binding("showNavPane", default: true))
+
                 RowDivider()
                 PickerRow(title: "Right-hand pane", selection: Binding(get: { sidePane }, set: {
                     sidePane = $0; explorerPrefs.set("sidePane", $0)
                 }), options: [("none", "None"), ("details", "Details"), ("preview", "Preview")])
+            }
+            Text("Navigation pane").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+            SettingsGroup(footer: "Pick what's listed down the left of every window. Drag to reorder.") {
+                ToggleRow(title: "Show the navigation pane", isOn: Binding(get: { navPane }, set: {
+                    navPane = $0; explorerPrefs.set("showNavPane", $0)
+                }))
+                RowDivider()
+                List {
+                    ForEach(navOrder, id: \.self) { id in
+                        let sec = ExplorerSetting.navSections.first { $0.id == id }!
+                        HStack(spacing: 10) {
+                            Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+                            Image(systemName: sec.symbol).frame(width: 20).foregroundStyle(Color.accentColor)
+                            Text(sec.title).font(.system(size: 13))
+                            Spacer()
+                            Toggle("", isOn: Binding(get: { !navHidden.contains(id) }, set: { show in
+                                if show { navHidden.remove(id) } else { navHidden.insert(id) }
+                                explorerPrefs.set(ExplorerSetting.navHidden, Array(navHidden))
+                            }))
+                            .labelsHidden()
+                        }
+                        .padding(.vertical, 3)
+                    }
+                    .onMove { from, to in
+                        navOrder.move(fromOffsets: from, toOffset: to)
+                        explorerPrefs.set(ExplorerSetting.navOrder, navOrder)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .frame(height: CGFloat(navOrder.count) * 34 + 8)
+                .disabled(!navPane).opacity(navPane ? 1 : 0.45)
             }
             HStack {
                 Spacer()
                 Button("Open File Explorer") { Supervisor.shared.showExplorer() }.disabled(!Part.explorer.enabled)
             }
         }
+    }
+}
+
+/// One File Explorer icon to pick (light, dark, or both halves for Auto).
+struct IconChoice: View {
+    let label: String
+    let dark: Bool?
+    let selected: Bool
+    let action: () -> Void
+    private static let explorerApp = parts.appendingPathComponent("File Explorer.app")
+    private static let light = NSWorkspace.shared.icon(forFile: explorerApp.path)
+    private static let darkIcon = NSImage(contentsOf: explorerApp.appendingPathComponent("Contents/Resources/AppIconDark.icns")) ?? light
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Group {
+                    if let dark {
+                        Image(nsImage: dark ? Self.darkIcon : Self.light).resizable()
+                    } else {   // Auto: half light, half dark
+                        ZStack {
+                            Image(nsImage: Self.light).resizable()
+                            Image(nsImage: Self.darkIcon).resizable().mask(alignment: .trailing) {
+                                Rectangle().frame(width: 22)
+                            }
+                        }
+                    }
+                }
+                .frame(width: 44, height: 44)
+                .padding(3)
+                .background(RoundedRectangle(cornerRadius: 10).strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 2))
+                Text(label).font(.system(size: 11)).foregroundStyle(selected ? .primary : .secondary)
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -937,6 +1149,12 @@ struct SquiggleSection: View {
                     penWidth = $0; squigglePrefs.set("penWidth", $0)
                 }), range: 1...20, step: 1, format: { "\(Int($0))pt" })
             }
+            HStack {
+                Button("Snip or Record…") { squigglePrefs.command("snip") }
+                Button("Draw on a Recording…") { squigglePrefs.command("openVideo") }
+                Spacer()
+            }
+            .disabled(!Part.squiggle.enabled)
             Text("Recording").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
             SettingsGroup {
                 ToggleRow(title: "Record sound from the Mac", detail: "What you hear: apps, videos, calls.",

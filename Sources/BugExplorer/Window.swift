@@ -438,9 +438,9 @@ enum Theme {
         case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
         default: NSApp.appearance = nil
         }
-        // Dark: the black icon (Dock, ⌘-Tab); light: the normal one from the bundle.
+        // The black icon or the normal one (BugOS › File Explorer › App icon; Auto follows the appearance).
         let darkIcon = Bundle.main.url(forResource: "AppIconDark", withExtension: "icns").flatMap(NSImage.init(contentsOf:))
-        NSApp.applicationIconImage = ExplorerSetting.isDark ? darkIcon : nil
+        NSApp.applicationIconImage = ExplorerSetting.iconIsDark ? darkIcon : nil
     }
 
     /// Re-read the theme and redraw every window.

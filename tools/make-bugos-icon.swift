@@ -1,4 +1,4 @@
-// Draws the BugOS app icon: a red ladybug on a dark blue squircle tile.
+// Draws the BugOS app icon: a white ladybug with red accents on a black glass squircle tile.
 // swift make-icon.swift <outdir>   -> <outdir>/AppIcon.iconset (then: iconutil -c icns)
 import AppKit
 let out = CommandLine.arguments[1]
@@ -25,15 +25,34 @@ func render(_ px: Int) -> NSBitmapImageRep {
     path.fill()
     NSGraphicsContext.restoreGraphicsState()
 
-    NSGradient(colors: [NSColor(calibratedRed: 0.13, green: 0.36, blue: 0.80, alpha: 1),
-                        NSColor(calibratedRed: 0.04, green: 0.12, blue: 0.36, alpha: 1)])!.draw(in: path, angle: -90)
+    // Black glass: deep gradient, a light rim, and a soft sheen across the top (like File Explorer's dark icon).
+    NSGradient(colors: [NSColor(white: 1, alpha: 0.42), NSColor(white: 1, alpha: 0.06)])!.draw(in: path, angle: -90)
+    let inner = NSBezierPath(roundedRect: tile.insetBy(dx: s * 0.006, dy: s * 0.006), xRadius: tile.width * 0.22, yRadius: tile.width * 0.22)
+    NSGradient(colors: [NSColor(white: 0.17, alpha: 1), NSColor(white: 0.02, alpha: 1)])!.draw(in: inner, angle: -90)
+    NSGraphicsContext.saveGraphicsState()
+    inner.addClip()
+    let sheen = NSBezierPath(ovalIn: NSRect(x: tile.minX - tile.width * 0.25, y: tile.midY + tile.height * 0.08,
+                                            width: tile.width * 1.5, height: tile.height * 0.9))
+    NSGradient(colors: [NSColor(white: 1, alpha: 0.13), NSColor(white: 1, alpha: 0)])!.draw(in: sheen, angle: -90)
+    NSGraphicsContext.restoreGraphicsState()
 
-    let cfg = NSImage.SymbolConfiguration(pointSize: tile.width * 0.62, weight: .regular)
-        .applying(NSImage.SymbolConfiguration(paletteColors: [.white, NSColor(calibratedRed: 0.95, green: 0.22, blue: 0.20, alpha: 1)]))
+    let cfg = NSImage.SymbolConfiguration(pointSize: tile.width * 0.56, weight: .regular)
+        .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor(white: 0.97, alpha: 1), NSColor(calibratedRed: 0.96, green: 0.20, blue: 0.20, alpha: 1)]))
     if let bug = NSImage(systemSymbolName: "ladybug.fill", accessibilityDescription: nil)?.withSymbolConfiguration(cfg) {
         let sz = bug.size
         let r = NSRect(x: tile.midX - sz.width / 2, y: tile.midY - sz.height / 2, width: sz.width, height: sz.height)
+        NSGraphicsContext.saveGraphicsState()
+        let bsh = NSShadow()
+        bsh.shadowColor = NSColor.black.withAlphaComponent(0.6)
+        bsh.shadowBlurRadius = s * 0.025
+        bsh.shadowOffset = NSSize(width: 0, height: -s * 0.012)
+        bsh.set()
+        // Red under the shell, so the spots (cut out of the symbol) show red.
+        let shell = NSRect(x: r.midX - r.width * 0.25, y: r.minY + r.height * 0.10, width: r.width * 0.50, height: r.height * 0.52)
+        NSGradient(colors: [NSColor(calibratedRed: 1.0, green: 0.30, blue: 0.28, alpha: 1),
+                            NSColor(calibratedRed: 0.78, green: 0.06, blue: 0.08, alpha: 1)])!.draw(in: NSBezierPath(ovalIn: shell), angle: -90)
         bug.draw(in: r, from: .zero, operation: .sourceOver, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
     }
     NSGraphicsContext.restoreGraphicsState()
     return rep

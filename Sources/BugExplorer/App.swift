@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             if on { Bridge.shared.start() } else { Bridge.shared.stop() }
             GlobalHotkey.reload()
             FinderRedirect.shared.reload()
+            Icons.reset()
             Theme.reload()
             NotificationCenter.default.post(name: .settingsChanged, object: nil)   // open windows redraw
         }

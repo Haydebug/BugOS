@@ -1,4 +1,4 @@
-BugOS 1.1.0
+BugOS 1.2.0
 ===========
 
 A Windows 11-style taskbar, File Explorer and screenshot tool for your Mac, in one app.
@@ -21,10 +21,11 @@ SETTINGS
 Open BugOS any time (Applications or Spotlight) for its page:
   Features       turn the taskbar, File Explorer or Squiggle on and off
   Taskbar        size, icon alignment, background and opacity, previews, music
-  Quick Corner   reorder or hide its shortcuts
+  Quick Corner   the fan from the bottom-right corner: order, colours, curve, add apps
+  Quick Access   swipe two fingers in from the trackpad's right edge (or your own key)
   File Explorer  folders, Save/Open dialogs, new-window shortcut, views, panes
   Squiggle       every shortcut (change or add your own), save folder, audio
-  General        start at login, the Mac Dock, restart a part, uninstall
+  General        updates, accent colour, start at login, the Mac Dock, restart a part, uninstall
 
 
 UNINSTALL

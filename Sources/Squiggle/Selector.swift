@@ -37,6 +37,8 @@ final class CaptureSession {
     private(set) var bar: CaptureBar!
     fileprivate let windows = windowsUnderneath()
     var onTarget: ((CaptureMode, CaptureTarget) -> Void)?
+    /// The screens as they were when the key was pressed (snips are cut from these; recording stays live).
+    var frozen = FrozenScreens()
     var onEnd: (() -> Void)?
     private var ended = false
 
@@ -148,12 +150,21 @@ final class CaptureOverlayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let s = session else { return }
         window?.invalidateCursorRects(for: self)
+        // Snipping: the frozen screen underneath (recording shows the live one).
+        let frozen = s.mode == .snip ? owner.flatMap { s.frozen.image(for: $0.screenRef) } : nil
+        if let frozen, let cg = NSGraphicsContext.current?.cgContext { cg.draw(frozen, in: bounds) }
+        let picked = sel ?? (s.shape == .window ? hover : nil)
+        // Dim everything except what's picked.
         NSColor.black.withAlphaComponent(0.35).setFill()
-        bounds.fill()
+        let dim = NSBezierPath(rect: bounds)
+        if let r = picked { dim.appendRect(r); dim.windingRule = .evenOdd }
+        if frozen != nil { dim.fill() } else { bounds.fill() }
         let accent: NSColor = s.mode == .record ? .systemRed : .white
-        if let r = sel ?? (s.shape == .window ? hover : nil) {
-            NSColor.clear.setFill()
-            r.fill(using: .copy)
+        if let r = picked {
+            if frozen == nil {
+                NSColor.clear.setFill()
+                r.fill(using: .copy)
+            }
             accent.setStroke()
             let p = NSBezierPath(rect: r.insetBy(dx: -1, dy: -1)); p.lineWidth = 2; p.stroke()
             if sel != nil {

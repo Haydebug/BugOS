@@ -115,43 +115,118 @@ public enum QuickCornerCatalog {
         public let id: String
         public let label: String
         public let symbol: String
-        /// An app you added (shown with its own icon), or nil for a built-in shortcut.
+        /// An app, file or folder you added (shown with its own icon), or nil for a built-in shortcut.
         public var appPath: String? { id.hasPrefix("app:") ? String(id.dropFirst(4)) : nil }
     }
     public static let all: [Entry] = [
         Entry(id: "finder", label: "File Explorer", symbol: "folder.fill"),
         Entry(id: "missioncontrol", label: "Mission Control", symbol: "rectangle.3.group.fill"),
         Entry(id: "screenshot", label: "Squiggle", symbol: "scribble.variable"),
+        Entry(id: "music", label: "Music", symbol: "music.note"),
+        Entry(id: "ai", label: "AI app", symbol: "sparkles"),
+        Entry(id: "browser", label: "Browser", symbol: "globe"),
+        Entry(id: "discord", label: "Discord", symbol: "bubble.left.and.bubble.right.fill"),
         Entry(id: "activity", label: "Activity Monitor", symbol: "waveform.path.ecg"),
         Entry(id: "apps", label: "All apps", symbol: "square.grid.3x3.fill"),
         Entry(id: "spotlight", label: "Search", symbol: "magnifyingglass"),
         Entry(id: "bugos", label: "BugOS Settings", symbol: "switch.2"),
         Entry(id: "settings", label: "System Settings", symbol: "gearshape.fill"),
+        // Last = top: in Quick Access (which hides the two settings) a swipe in and release flips apps.
+        Entry(id: "recent", label: "Recent", symbol: "clock"),
     ]
     public static let orderKey = "quickCornerOrder"
     public static let hiddenKey = "quickCornerHidden"
-    /// Paths of apps you added with + on the BugOS page.
+    /// Paths of apps, files and folders you added with + on the BugOS page.
     public static let appsKey = "quickCornerApps"
+    /// "#RRGGBB" tint for the shortcut tiles (missing = plain glass) and for their icons (missing = white).
+    public static let tileColorKey = "quickCornerTileColor"
+    /// Two fingers up from the trackpad's bottom-right corner open the fan (default on); corner size 0.15…0.4.
+    public static let gestureKey = "quickCornerGesture"
+    /// Keyboard shortcut that opens Quick Access (Shortcut.stored; missing or "" = none, the default).
+    public static let accessShortcutKey = "quickAccessShortcut"
+    /// How much the fan curves away from the screen edge: 0 straight … 1 (default) … 2.
+    public static let curveKey = "quickCornerCurve"
+    /// Which app the Music shortcut opens (bundle id; default Spotify, or Apple Music without it).
+    public static let musicAppKey = "quickCornerMusicApp"
+    /// Which app the AI shortcut opens (bundle id; default Claude). Shared by the quick corner and Quick Access.
+    public static let aiAppKey = "quickCornerAIApp"
+    /// Which browser the Browser shortcut opens: "default" (the Mac's default browser) or a bundle id.
+    public static let browserAppKey = "quickCornerBrowserApp"
+    public static let browsers: [(id: String, name: String)] = [
+        ("com.apple.Safari", "Safari"), ("com.google.Chrome", "Chrome"), ("company.thebrowser.Browser", "Arc"),
+        ("org.mozilla.firefox", "Firefox"), ("com.microsoft.edgemac", "Edge"), ("com.brave.Browser", "Brave"),
+        ("com.operasoftware.Opera", "Opera"),
+    ]
+
+    /// The AI shortcut's name: the app it opens.
+    public static var aiName: String {
+        let id = UserDefaults.standard.string(forKey: aiAppKey) ?? "com.anthropic.claudefordesktop"
+        return aiApps.first { $0.id == id }?.name ?? "AI"
+    }
+    public static let aiApps: [(id: String, name: String)] = [
+        ("com.anthropic.claudefordesktop", "Claude"), ("com.openai.codex", "Codex"), ("com.openai.chat", "ChatGPT"),
+    ]
+    public static let gestureZoneKey = "quickCornerGestureZone"
+    /// Turn off macOS's swipe-in-from-the-right for Notification Center while the gesture is on (default on).
+    public static let muteSwipeKey = "quickCornerMuteNotificationSwipe"
+    /// How many fingers the gesture takes: 2, 3 or 4 (default 4).
+    public static let gestureFingersKey = "quickCornerGestureFingers"
+    public static let iconColorKey = "quickCornerIconColor"
+
+    /// Where a list of shortcuts is kept. The quick corner (the fan from the bottom-right corner) and Quick
+    /// Access (the column the trackpad swipe brings in) each have their own order, hidden items and added apps.
+    public struct List: Sendable {
+        public let order: String, hidden: String, apps: String
+        /// Until you arrange them: the order (nearest the corner / bottom first) and what's hidden.
+        public let defaultOrder: [String]
+        public let defaultHidden: [String]
+    }
+    /// The fan, from the corner up: File Explorer … System Settings.
+    public static let corner = List(order: orderKey, hidden: hiddenKey, apps: appsKey,
+                                    defaultOrder: ["finder", "missioncontrol", "screenshot", "music", "browser", "activity",
+                                                   "apps", "spotlight", "bugos", "settings"],
+                                    defaultHidden: ["recent", "ai", "discord"])
+    /// Quick Access, top to bottom: Recent, Music, Browser, Squiggle, Search, All apps, Activity Monitor,
+    /// Mission Control, File Explorer (stored bottom first).
+    public static let access = List(order: "quickAccessOrder", hidden: "quickAccessHidden", apps: "quickAccessApps",
+                                    defaultOrder: ["finder", "missioncontrol", "activity", "apps", "spotlight", "screenshot",
+                                                   "browser", "music", "recent"],
+                                    defaultHidden: ["settings", "bugos", "ai", "discord"])
 
     public static func appEntry(_ path: String) -> Entry {
-        Entry(id: "app:" + path, label: FileManager.default.displayName(atPath: path).replacingOccurrences(of: ".app", with: ""),
-              symbol: "app")
+        var name = FileManager.default.displayName(atPath: path)
+        if name.hasSuffix(".app") { name = String(name.dropLast(4)) }
+        return Entry(id: "app:" + path, label: name, symbol: "app")
     }
 
     /// Every entry (built-in and added apps) in the saved order; new ones go on the end (the top of the fan).
-    public static func ordered(_ saved: [String]?, apps: [String] = []) -> [Entry] {
+    public static func ordered(_ saved: [String]?, apps: [String] = [], defaultOrder: [String] = []) -> [Entry] {
         let everything = all + apps.map(appEntry)
         let saved = saved ?? []
         let known = saved.compactMap { id in everything.first { $0.id == id } }
         let rest = everything.filter { !saved.contains($0.id) }
-        // Without a saved order, added apps sit just under the top two (BugOS and System Settings).
+        // Not arranged yet: the list's default order (shortcuts it leaves out go nearest the corner, hidden by
+        // default), with added apps just under the top two.
         if saved.isEmpty {
             let builtIns = all.map(\.id)
-            let base = rest.filter { builtIns.contains($0.id) }
+            let listed = defaultOrder.compactMap { id in rest.first { $0.id == id } }
+            let others = rest.filter { builtIns.contains($0.id) && !defaultOrder.contains($0.id) }
+            let base = others + (defaultOrder.isEmpty ? rest.filter { builtIns.contains($0.id) } : listed)
             let added = rest.filter { !builtIns.contains($0.id) }
             return base.dropLast(2) + added + base.suffix(2)
         }
-        return known + rest
+        // A built-in shortcut that's new since you arranged them goes right after its neighbour in the default
+        // order (Music after Squiggle), not on top. Added apps go on the end (the top of the fan).
+        var result = known
+        for e in rest {
+            if let i = all.firstIndex(where: { $0.id == e.id }), i > 0,
+               let after = result.firstIndex(where: { $0.id == all[i - 1].id }) {
+                result.insert(e, at: after + 1)
+            } else {
+                result.append(e)
+            }
+        }
+        return result
     }
 }
 
@@ -261,8 +336,18 @@ public enum SquiggleShortcuts {
 }
 
 public enum ExplorerSetting {
-    /// File Explorer is showing dark (its Appearance is Dark, or Auto while the Mac is dark): its icon is the
-    /// black one (AppIconDark.icns). Readable from any part.
+    /// File Explorer is showing dark (its Appearance is Dark, or Auto while the Mac is dark). Readable from any part.
+    /// App icon (taskbar, Dock, ⌘-Tab): "auto" (default, follows File Explorer's appearance) | "light" | "dark".
+    public static let iconStyle = "iconStyle"
+    /// Whether File Explorer's icon is the black one (AppIconDark.icns).
+    public static var iconIsDark: Bool {
+        CFPreferencesAppSynchronize(BugOSID.explorer as CFString)
+        switch CFPreferencesCopyAppValue(iconStyle as CFString, BugOSID.explorer as CFString) as? String {
+        case "dark": return true
+        case "light": return false
+        default: return isDark
+        }
+    }
     public static var isDark: Bool {
         CFPreferencesAppSynchronize(BugOSID.explorer as CFString)
         let a = CFPreferencesCopyAppValue("appearance" as CFString, BugOSID.explorer as CFString) as? String ?? "system"
@@ -276,6 +361,23 @@ public enum ExplorerSetting {
     public static let defaultNewWindowShortcut = Shortcut(kVK_ANSI_E, cmdKey | optionKey)
     /// Where new windows open: "home:" (default), "thismac:", or a folder path.
     public static let startLocation = "startLocation"
+    /// "windows" (default: a file shows the icon of the app that opens it) | "mac" (macOS document icons).
+    public static let fileIcons = "fileIcons"
+    /// Navigation pane sections you've hidden: home, applications, icloud, quickAccess, thisMac, network, recycleBin.
+    public static let navHidden = "navHidden"
+    /// Your order for them (missing = the order below).
+    public static let navOrder = "navOrder"
+    /// The sections in your order (new ones at the end).
+    public static func orderedNavSections(_ saved: [String]?) -> [(id: String, title: String, symbol: String)] {
+        let saved = saved ?? []
+        return saved.compactMap { id in navSections.first { $0.id == id } } + navSections.filter { !saved.contains($0.id) }
+    }
+    public static let navSections: [(id: String, title: String, symbol: String)] = [
+        ("home", "Home", "house.fill"), ("applications", "Applications", "square.grid.3x3.fill"),
+        ("icloud", "iCloud Drive", "icloud.fill"), ("quickAccess", "Quick access (pinned folders)", "pin.fill"),
+        ("thisMac", "This Mac (drives)", "laptopcomputer"), ("network", "Network", "network"),
+        ("recycleBin", "Recycle Bin", "trash"),
+    ]
     /// "windows" (default) | "mica" | "glass".
     public static let theme = "theme"
     /// "system" (default) | "light" | "dark".
