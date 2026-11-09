@@ -14,7 +14,7 @@
 //   BugOS --login              started at login (LaunchAgent com.bugos.os): parts only, the page only if
 //                              a permission is missing
 //   BugOS --setup              show the page at Permissions
-//   BugOS --page <section>     show the page at general | features | permissions | taskbar | altTab | quickCorner | quickAccess | explorer | squiggle
+//   BugOS --page <section>     show the page at general | features | permissions | taskbar | altTab | quickCorner | quickAccess | explorer | squiggle | misc
 //   BugOS --start <part>       start dock | explorer | squiggle (the parts use this to hand themselves over)
 //   BugOS --open <paths…>      open folders in File Explorer
 //   BugOS --restart <part>     restart one part (./build.sh update uses this)

@@ -1,4 +1,4 @@
-BugOS 1.4.0
+BugOS 1.5.0
 ===========
 
 A Windows 11-style taskbar, File Explorer and screenshot tool for your Mac, in one app.

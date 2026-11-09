@@ -444,3 +444,9 @@ public enum AltTabSetting {
     /// Window order: "recent" (default: most recently used first), "taskbar" (the taskbar's order) or "name" (A–Z).
     public static let order = "altTabOrder"
 }
+
+/// BugOS › Misc settings (in the taskbar's preferences: the taskbar process does the work).
+public enum MiscSetting {
+    /// Shift + scroll = scroll sideways (default off).
+    public static let shiftScroll = "shiftScrollSideways"
+}

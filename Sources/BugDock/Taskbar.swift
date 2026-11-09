@@ -84,6 +84,7 @@ final class TaskbarController: ObservableObject {
                 CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
                 if self?.isPrimary == true {
                     QuickAccessHotkey.reload()
+                    ShiftScroll.shared.reload()
                     self?.altTab.reload()
                     self?.tracker.reloadSettings()
                     TaskbarSet.shared?.sync()
@@ -98,6 +99,7 @@ final class TaskbarController: ObservableObject {
             QuickAccessHotkey.corner = quickCorner
             QuickAccessHotkey.reload()
             _ = altTab   // Alt-Tab listens from the start
+            ShiftScroll.shared.reload()
         }
         groupsSub = tracker.$groups.receive(on: RunLoop.main).sink { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshShown() }

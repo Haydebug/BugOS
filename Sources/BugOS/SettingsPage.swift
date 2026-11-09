@@ -40,7 +40,7 @@ let explorerPrefs = PartPrefs(domain: BugOSID.explorer, changed: BugOSID.explore
 let squigglePrefs = PartPrefs(domain: BugOSID.squiggle, changed: BugOSID.squiggleSettingsChanged)
 
 enum PageSection: String, CaseIterable, Identifiable {
-    case general, features, permissions, taskbar, altTab, quickCorner, quickAccess, explorer, squiggle
+    case general, features, permissions, taskbar, altTab, quickCorner, quickAccess, explorer, squiggle, misc
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -52,6 +52,7 @@ enum PageSection: String, CaseIterable, Identifiable {
         case .quickCorner: "Quick Corner"
         case .quickAccess: "Quick Access"
         case .altTab: "Alt-Tab"
+        case .misc: "Misc"
         case .explorer: "File Explorer"
         }
     }
@@ -65,6 +66,7 @@ enum PageSection: String, CaseIterable, Identifiable {
         case .quickCorner: "square.stack.3d.up"
         case .quickAccess: "hand.draw"
         case .altTab: "rectangle.on.rectangle"
+        case .misc: "ellipsis.circle"
         case .explorer: "folder"
         }
     }
@@ -141,6 +143,7 @@ struct PageView: View {
                         case .quickCorner: QuickCornerSection()
                         case .quickAccess: QuickAccessSection()
                         case .altTab: AltTabSection()
+                        case .misc: MiscSection()
                         case .explorer: ExplorerSection()
                         case .features: FeaturesSection()
                         case .squiggle: SquiggleSection()
@@ -610,6 +613,18 @@ struct QuickCornerSection: View {
                     for k in [QuickCornerCatalog.tileColorKey, QuickCornerCatalog.iconColorKey, QuickCornerCatalog.curveKey] { dockPrefs.set(k, nil) }
                     tile = nil; glyph = nil; curve = 1
                 }
+            }
+        }
+    }
+}
+
+struct MiscSection: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            PartOffBanner(part: .dock)
+            SettingsGroup(footer: "Hold Shift while scrolling (mouse wheel or trackpad) and up/down scrolls left/right instead, like Windows.") {
+                ToggleRow(title: "Shift to scroll sideways",
+                          isOn: dockPrefs.binding(MiscSetting.shiftScroll, default: false))
             }
         }
     }
