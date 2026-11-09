@@ -161,7 +161,7 @@ final class PeekController {
     /// looks exactly the same while peeking.
     private func fitToScreen(_ s: NSScreen) {
         let screen = s.frame
-        let strip = s == bar.screen ? Metrics.barHeight : 0
+        let strip = TaskbarSet.hasBar(s) ? Metrics.barHeight : 0
         let frame = NSRect(x: screen.minX, y: screen.minY + strip,
                            width: screen.width, height: screen.height - strip)
         if panel.frame != frame { panel.setFrame(frame, display: false) }

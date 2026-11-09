@@ -437,6 +437,8 @@ struct TaskbarSection: View {
     @State private var peek: Double = dockPrefs.value("peekStrength", default: 0.5)
     @State private var spotifyID: String = dockPrefs.value(DockSetting.spotifyClientID, default: "")
     @State private var spotifyOn: Bool = dockPrefs.value("spotifyConnected", default: false)
+    @State private var allDisplays: Bool = dockPrefs.value(DockSetting.allDisplays, default: true)
+    @State private var appsOn: String = dockPrefs.value(DockSetting.barAppsOn, default: "all")
     private let spotifyTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
     @State private var size: String = dockPrefs.value(DockSetting.barSize, default: "medium")
     @State private var align: String = dockPrefs.value(DockSetting.barAlignment, default: "center")
@@ -487,6 +489,18 @@ struct TaskbarSection: View {
                 PickerRow(title: "Running app mark", selection: Binding(get: { indicator }, set: {
                     indicator = $0; dockPrefs.set(DockSetting.indicator, $0)
                 }), options: [("pill", "Pill"), ("dot", "Dot"), ("line", "Line"), ("none", "None")])
+            }
+            Text("Multiple displays").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+            SettingsGroup(footer: "Like Windows: a taskbar along the bottom of every screen. The main screen's keeps the music, the quick corner and Alt-Tab.") {
+                ToggleRow(title: "Show the taskbar on all displays",
+                          isOn: Binding(get: { allDisplays }, set: { allDisplays = $0; dockPrefs.set(DockSetting.allDisplays, $0) }))
+                RowDivider()
+                PickerRow(title: "Show apps on", detail: appsOn == "where"
+                            ? "Each app on the taskbar of the screen its window is on; pinned apps on the main one."
+                            : "Every app on every taskbar.",
+                          selection: Binding(get: { appsOn }, set: { appsOn = $0; dockPrefs.set(DockSetting.barAppsOn, $0) }),
+                          options: [("all", "All taskbars"), ("where", "Where the window is")])
+                .disabled(!allDisplays).opacity(allDisplays ? 1 : 0.45)
             }
             Text("Behavior").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
             SettingsGroup {
@@ -605,11 +619,12 @@ struct AltTabSection: View {
     @State private var enabled: Bool = dockPrefs.value(AltTabSetting.enabled, default: true)
     @State private var key: String = dockPrefs.value(AltTabSetting.key, default: "option")
     @State private var size: String = dockPrefs.value(AltTabSetting.size, default: "medium")
+    @State private var order: String = dockPrefs.value(AltTabSetting.order, default: "recent")
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             PartOffBanner(part: .dock)
-            SettingsGroup(footer: "Like Windows 11: hold the key and tap Tab to see every window, most recently used first. Tab or ← → to move, Shift-Tab to go back, let go to switch. Esc cancels; you can also point at a window and click it.") {
+            SettingsGroup(footer: "Like Windows 11: hold the key and tap Tab to see every window (most recently used first, or the order you pick below). Tab or ← → to move, Shift-Tab to go back, let go to switch. Esc cancels; you can also point at a window and click it.") {
                 ToggleRow(title: "Alt-Tab", detail: "Switch between windows, not just apps.",
                           isOn: Binding(get: { enabled }, set: { enabled = $0; dockPrefs.set(AltTabSetting.enabled, $0) }))
                 RowDivider()
@@ -619,6 +634,11 @@ struct AltTabSection: View {
                 .disabled(!enabled).opacity(enabled ? 1 : 0.45)
             }
             SettingsGroup {
+                PickerRow(title: "Order", detail: order == "taskbar" ? "Apps in the order they sit on the taskbar."
+                            : order == "name" ? "A to Z by app, then by window title." : "The window you used last comes first.",
+                          selection: Binding(get: { order }, set: { order = $0; dockPrefs.set(AltTabSetting.order, $0) }),
+                          options: [("recent", "Recently used"), ("taskbar", "Taskbar"), ("name", "A–Z")])
+                RowDivider()
                 PickerRow(title: "Preview size", selection: Binding(get: { size }, set: { size = $0; dockPrefs.set(AltTabSetting.size, $0) }),
                           options: [("small", "Small"), ("medium", "Medium"), ("large", "Large")])
                 RowDivider()
@@ -1250,7 +1270,8 @@ struct PickerRow: View {
             Picker("", selection: $selection) {
                 ForEach(options, id: \.0) { Text($0.1).tag($0.0) }
             }
-            .pickerStyle(.segmented).labelsHidden().frame(width: CGFloat(options.count) * 90)
+            // Segments as wide as their labels (fixed widths let long labels spill out of the row).
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
     }

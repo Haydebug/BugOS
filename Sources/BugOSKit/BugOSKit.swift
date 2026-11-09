@@ -44,6 +44,11 @@ public enum DockSetting {
     public static let showPreviews = "showPreviews"
     /// Seconds before a preview appears (default 0.35).
     public static let previewDelay = "previewDelay"
+    /// A taskbar on every display, not just the main one (default on).
+    public static let allDisplays = "barAllDisplays"
+    /// With several taskbars, which apps each shows: "all" (default, every app on every bar) or "where"
+    /// (the bars of the screens its windows are on; pinned apps on the main bar).
+    public static let barAppsOn = "barAppsOn"
 }
 
 /// Squiggle settings the BugOS page can change (stored in Squiggle's preferences).
@@ -436,4 +441,6 @@ public enum AltTabSetting {
     public static let showMinimized = "altTabShowMinimized"
     /// "small" | "medium" (default) | "large" thumbnails.
     public static let size = "altTabSize"
+    /// Window order: "recent" (default: most recently used first), "taskbar" (the taskbar's order) or "name" (A–Z).
+    public static let order = "altTabOrder"
 }

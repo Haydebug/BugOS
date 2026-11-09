@@ -38,7 +38,16 @@ struct BarStyle: Equatable {
 final class TaskbarController: ObservableObject {
     let tracker: WindowTracker
     let panel = FloatingPanel(level: .taskbar)
-    let nowPlaying = NowPlaying()
+    let nowPlaying: NowPlaying
+    /// The main screen's bar (menu-bar screen) has the music, the quick corner, Alt-Tab and the shortcuts;
+    /// the bars on other screens (BugOS › Taskbar › Show the taskbar on all displays) are plain taskbars.
+    let isPrimary: Bool
+    /// Which screen an extra bar belongs to (nil: the main screen).
+    let displayID: CGDirectDisplayID?
+    /// The apps this bar shows (all of them, or the ones with a window on its screen; a setting).
+    @Published private(set) var shownGroups: [AppGroup] = []
+    private var groupsSub: AnyCancellable?
+    private var refreshTimer: Timer?
     lazy var preview = PreviewController(tracker: tracker, bar: self)
     lazy var startMenu = StartMenuController(tracker: tracker, bar: self)
     lazy var quickCorner = QuickCornerController(bar: self)
@@ -51,13 +60,18 @@ final class TaskbarController: ObservableObject {
     /// Button frames in bar-view coordinates (top-left origin), for right-click hit testing.
     var itemFrames: [String: CGRect] = [:]
 
-    init(tracker: WindowTracker) {
+    init(tracker: WindowTracker, nowPlaying: NowPlaying? = nil, displayID: CGDirectDisplayID? = nil) {
         self.tracker = tracker
+        self.nowPlaying = nowPlaying ?? NowPlaying()
+        self.displayID = displayID
+        self.isPrimary = displayID == nil
         // The BugOS page changed a setting: pick it up now.
         // Its settings live on the BugOS page (there's no menu-bar icon); the page also sends commands here.
         DistributedNotificationCenter.default().addObserver(forName: BugOSID.dockSettingsChanged, object: nil, queue: .main) { [weak self] n in
             let command = n.object as? String
             MainActor.assumeIsolated {
+                // Commands are for the main bar; every bar picks up new settings.
+                if command != nil, self?.isPrimary != true { return }
                 switch command {
                 case "pause": QuickAccessHotkey.unregister(); return   // the page is recording a shortcut
                 case "spotify:connect": SpotifyAuth.shared.connect(); return
@@ -68,20 +82,33 @@ final class TaskbarController: ObservableObject {
                 default: break
                 }
                 CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
-                QuickAccessHotkey.reload()
-                self?.altTab.reload()
-                self?.tracker.reloadSettings()
+                if self?.isPrimary == true {
+                    QuickAccessHotkey.reload()
+                    self?.altTab.reload()
+                    self?.tracker.reloadSettings()
+                    TaskbarSet.shared?.sync()
+                }
                 self?.style = BarStyle()
+                self?.refreshShown()
                 self?.layout()
             }
         }
-        AppHistory.shared.start()   // for Quick Access's "Recent"
-        QuickAccessHotkey.corner = quickCorner
-        QuickAccessHotkey.reload()
-        _ = altTab   // Alt-Tab listens from the start
+        if isPrimary {
+            AppHistory.shared.start()   // for Quick Access's "Recent"
+            QuickAccessHotkey.corner = quickCorner
+            QuickAccessHotkey.reload()
+            _ = altTab   // Alt-Tab listens from the start
+        }
+        groupsSub = tracker.$groups.receive(on: RunLoop.main).sink { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshShown() }
+        }
+        // Windows move between screens without the app list changing: look again now and then.
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshShown() }
+        }
         // Every space, but hidden by Mission Control / Exposé (macOS does that for "transient" windows).
         panel.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
-        let root = TaskbarView(tracker: tracker, bar: self, nowPlaying: nowPlaying, style: self)
+        let root = TaskbarView(tracker: tracker, bar: self, nowPlaying: self.nowPlaying, style: self)
         let host = BarHostingView(rootView: root)
         host.bar = self
         panel.contentView = host
@@ -91,7 +118,40 @@ final class TaskbarController: ObservableObject {
         }
     }
 
-    var screen: NSScreen { NSScreen.screens.first ?? NSScreen.main! }   // the one with the menu bar
+    /// The screen this bar sits on: the menu-bar screen, or an extra bar's own screen.
+    var screen: NSScreen {
+        if let displayID, let s = NSScreen.screens.first(where: { ScreenID.of($0) == displayID }) { return s }
+        return NSScreen.screens.first ?? NSScreen.main!
+    }
+
+    /// Which apps this bar shows. "All taskbars" (default): every app on every bar. "Where the window is
+    /// open": an app shows on the bars of the screens its windows are on, and pinned or windowless apps on
+    /// the main bar only (like Windows).
+    func refreshShown() {
+        let groups = tracker.groups
+        let mode = UserDefaults.standard.string(forKey: DockSetting.barAppsOn) ?? "all"
+        let new: [AppGroup]
+        if mode != "where" || TaskbarSet.shared?.hasExtraBars != true {
+            new = groups
+        } else {
+            let mine = screen
+            new = groups.filter { g in
+                let screens = g.windows.compactMap { TaskbarSet.screen(of: $0) }
+                if screens.isEmpty { return isPrimary }                        // pinned / no windows: main bar
+                return screens.contains { $0 == mine }
+            }
+        }
+        if new.map(\.id) != shownGroups.map(\.id) || new != shownGroups { shownGroups = new }
+    }
+
+    /// An extra bar going away (its screen was unplugged, or the setting turned off).
+    func tearDown() {
+        refreshTimer?.invalidate()
+        fullScreenTimer?.invalidate()
+        groupsSub = nil
+        preview.hide()
+        panel.orderOut(nil)
+    }
 
     func show() {
         layout()
@@ -142,18 +202,18 @@ final class TaskbarController: ObservableObject {
         if full {
             preview.hide()
             startMenu.close()
-            quickCorner.close()
+            if isPrimary { quickCorner.close() }
             panel.orderOut(nil)
         } else {
             panel.orderFrontRegardless()
         }
-        quickCorner.layout()
+        if isPrimary { quickCorner.layout() }
     }
 
     func layout() {
         let f = screen.frame
         panel.setFrame(NSRect(x: f.minX, y: f.minY, width: f.width, height: Metrics.barHeight), display: true)
-        quickCorner.layout()
+        if isPrimary { quickCorner.layout() }
     }
 
     /// Convert a SwiftUI `.global` rect inside the bar to screen coordinates.
@@ -241,9 +301,10 @@ struct TaskbarView: View {
     private var slot: CGFloat { style.style.height - 2 }   // button width + HStack spacing
 
     private var displayed: [AppGroup] {
-        guard let liveOrder else { return tracker.groups }
-        let byID = Dictionary(tracker.groups.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        return liveOrder.compactMap { byID[$0] } + tracker.groups.filter { !liveOrder.contains($0.id) }
+        let groups = style.shownGroups
+        guard let liveOrder else { return groups }
+        let byID = Dictionary(groups.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return liveOrder.compactMap { byID[$0] } + groups.filter { !liveOrder.contains($0.id) }
     }
 
     var body: some View {
@@ -256,10 +317,10 @@ struct TaskbarView: View {
                 if st.alignLeft { Spacer() }
             }
             HStack(spacing: 8) {
-                if !tracker.axTrusted { permissionsButton }
-                if !st.alignLeft { NowPlayingWidget(model: nowPlaying) }
+                if !tracker.axTrusted && bar.isPrimary { permissionsButton }
+                if !st.alignLeft && bar.isPrimary { NowPlayingWidget(model: nowPlaying) }
                 Spacer()
-                if st.alignLeft { NowPlayingWidget(model: nowPlaying).padding(.trailing, 10) }
+                if st.alignLeft && bar.isPrimary { NowPlayingWidget(model: nowPlaying).padding(.trailing, 10) }
             }
             .padding(.leading, st.floating ? 18 : 10)
             .padding(.trailing, st.floating ? 8 : 0)
@@ -304,7 +365,7 @@ struct TaskbarView: View {
 
     private func dragChanged(_ id: String, _ dx: CGFloat) {
         if dragging == nil {
-            let ids = tracker.groups.map(\.id)
+            let ids = style.shownGroups.map(\.id)
             guard let i = ids.firstIndex(of: id) else { return }
             dragging = id
             liveOrder = ids

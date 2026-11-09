@@ -42,6 +42,7 @@ final class AltTabController {
     private(set) var useCommand = false
     private(set) var showMinimized = true
     private(set) var cardWidth: CGFloat = 240
+    private(set) var order = "recent"
 
     init(tracker: WindowTracker, bar: TaskbarController) {
         self.tracker = tracker
@@ -60,6 +61,7 @@ final class AltTabController {
         enabled = d.object(forKey: AltTabSetting.enabled) as? Bool ?? true
         useCommand = d.string(forKey: AltTabSetting.key) == "command"
         showMinimized = d.object(forKey: AltTabSetting.showMinimized) as? Bool ?? true
+        order = d.string(forKey: AltTabSetting.order) ?? "recent"
         switch d.string(forKey: AltTabSetting.size) {
         case "small": cardWidth = 190
         case "large": cardWidth = 300
@@ -124,22 +126,34 @@ final class AltTabController {
 
     // MARK: Open / move / switch
 
-    /// Windows, most recently used first: the front app's windows front to back, then the other apps in
-    /// the order you last used them.
+    /// Windows in the chosen order (BugOS › Alt-Tab › Order):
+    ///   recent (default)  most recently used first: the front app's windows front to back, then the other
+    ///                     apps in the order you last used them;
+    ///   taskbar           the order the apps sit in on the taskbar;
+    ///   name              A–Z by app, then by window title.
     private func windowsInOrder() -> [AltTabItem] {
         let groups = tracker.groups.filter { !$0.windows.isEmpty }
-        let recent = AppHistory.shared.recentPIDs
-        func rank(_ g: AppGroup) -> Int { g.pids.compactMap { recent.firstIndex(of: $0) }.min() ?? Int.max }
-        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        let sorted = groups.sorted { a, b in
-            let af = front.map { a.pids.contains($0) } ?? false, bf = front.map { b.pids.contains($0) } ?? false
-            if af != bf { return af }
-            return rank(a) < rank(b)
+        let sorted: [AppGroup]
+        switch order {
+        case "taskbar":
+            sorted = groups   // the tracker keeps the taskbar's order
+        case "name":
+            sorted = groups.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        default:
+            let recent = AppHistory.shared.recentPIDs
+            func rank(_ g: AppGroup) -> Int { g.pids.compactMap { recent.firstIndex(of: $0) }.min() ?? Int.max }
+            let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            sorted = groups.sorted { a, b in
+                let af = front.map { a.pids.contains($0) } ?? false, bf = front.map { b.pids.contains($0) } ?? false
+                if af != bf { return af }
+                return rank(a) < rank(b)
+            }
         }
         var out: [AltTabItem] = []
         for g in sorted {
             let icon = IconCache.shared.icon(for: g)
-            let wins = g.windows.filter { showMinimized || !$0.isMinimized }
+            var wins = g.windows.filter { showMinimized || !$0.isMinimized }
+            if order == "name" { wins.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending } }
             // Minimized ones after the app's open windows.
             for w in wins.filter({ !$0.isMinimized }) + wins.filter(\.isMinimized) {
                 out.append(AltTabItem(window: w, appName: g.name, icon: icon))
@@ -154,12 +168,22 @@ final class AltTabController {
         bar.preview.hide()
         model.items = items
         model.thumbs = Dictionary(uniqueKeysWithValues: items.compactMap { i in Thumbnails.shared.cached(i.window).map { (i.id, $0) } })
-        // Like Windows: the first Tab picks the window you were in before this one.
-        model.selected = items.count > 1 ? (backwards ? items.count - 1 : 1) : 0
+        // Like Windows: the first Tab picks the next window after the one you're in (with "recent",
+        // that's the one you were in before). Shift-Tab picks the one before it.
+        let current = currentIndex(in: items) ?? 0
+        model.selected = items.count > 1 ? ((current + (backwards ? -1 : 1)) % items.count + items.count) % items.count : 0
         layout()
         panel.alphaValue = 1
         panel.orderFrontRegardless()
         loadThumbnails()
+    }
+
+    /// The window you're in now: the front app's focused window, else its first one.
+    private func currentIndex(in items: [AltTabItem]) -> Int? {
+        guard let front = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
+        if let focused = WindowReader.focusedWindow(pid: front),
+           let i = items.firstIndex(where: { $0.window.pid == front && CFEqual($0.window.element, focused) }) { return i }
+        return items.firstIndex { $0.window.pid == front }
     }
 
     private func layout() {

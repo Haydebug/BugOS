@@ -16,7 +16,7 @@ enum BugDockMain {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var tracker: WindowTracker!
-    private var bar: TaskbarController!
+    private var bars: TaskbarSet!
     private var started = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -61,7 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Thumbnails.shared.requestPermissionIfNeeded()
         }
         tracker = WindowTracker(pins: PinStore())
-        bar = TaskbarController(tracker: tracker)
-        bar.show()   // (BugOS starts at login and restarts the bar if it crashes.)
+        bars = TaskbarSet(tracker: tracker)   // the main bar, and one per extra display
+        bars.show()   // (BugOS starts at login and restarts the bar if it crashes.)
     }
 }

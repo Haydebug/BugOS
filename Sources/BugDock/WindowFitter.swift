@@ -90,20 +90,22 @@ final class WindowFitter {
               AX.bool(w, kAXMinimizedAttribute) != true,
               AX.bool(w, "AXFullScreen") != true,
               let frame = AX.frame(w),
-              let primary = NSScreen.screens.first else { return }
+              let mainScreen = NSScreen.screens.first else { return }
 
         if let failed = gaveUp[key] {
             if failed == frame { return }
             gaveUp[key] = nil
         }
 
-        // AX uses global top-left coordinates with the origin at the primary (menu-bar) screen's top-left.
-        let screenH = primary.frame.height
-        let barTop = screenH - Metrics.barHeight
-        let visibleTop = screenH - primary.visibleFrame.maxY            // just under the menu bar
-        let onBarScreen = frame.midX >= primary.frame.minX && frame.midX <= primary.frame.maxX
-            && frame.minY < barTop
-        guard onBarScreen else { return }
+        // AX uses global top-left coordinates with the origin at the main (menu-bar) screen's top-left.
+        // The window's screen (where its middle is) has to have a taskbar: the main one, or any with
+        // "Show the taskbar on all displays".
+        let mainH = mainScreen.frame.height
+        let mid = CGPoint(x: frame.midX, y: mainH - frame.midY)          // Cocoa coordinates
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mid) }), TaskbarSet.hasBar(screen) else { return }
+        let barTop = mainH - screen.frame.minY - Metrics.barHeight      // AX y of the bar's top edge
+        let visibleTop = mainH - screen.visibleFrame.maxY               // just under the menu bar (or the top)
+        guard frame.minY < barTop else { return }
 
         // Just trimmed by us and then moved by a still-running animation (e.g. Fill moving its top
         // from 65 to 33 after we'd set the height): snap the bottom back onto the bar, gap or overlap.
