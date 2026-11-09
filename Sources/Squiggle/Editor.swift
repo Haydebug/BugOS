@@ -50,7 +50,8 @@ final class EditorWindow: NSWindow, NSWindowDelegate {
                    styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         isReleasedWhenClosed = false
         delegate = self
-        level = .floating
+        // A normal window: it opens on top, and clicking somewhere else sends it behind, like any window.
+        level = .normal
 
         let content = NSView(frame: NSRect(origin: .zero, size: contentSize))
         canvas.frame.origin = NSPoint(x: (contentW - canvasSize.width) / 2, y: 0)
@@ -103,10 +104,8 @@ final class EditorWindow: NSWindow, NSWindowDelegate {
         panel.nameFieldStringValue = "Squiggle \(timestamp()).png"
         panel.directoryURL = saveFolder
         panel.canCreateDirectories = true
-        level = .normal
         panel.beginSheetModal(for: self) { [weak self] resp in
             guard let self else { return }
-            self.level = .floating
             guard resp == .OK, let url = panel.url, let rep = self.canvas.render() else { return }
             let isJPEG = ["jpg", "jpeg"].contains(url.pathExtension.lowercased())
             let data = isJPEG ? rep.representation(using: .jpeg, properties: [.compressionFactor: 0.92])

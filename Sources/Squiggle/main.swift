@@ -283,10 +283,18 @@ final class App: NSObject, NSApplicationDelegate {
         t.show()
     }
 
+    /// While an editor is open, Squiggle is a normal app (on the taskbar and in ⌘-Tab), so a window that went
+    /// behind others is easy to get back to; with none open it's back in the background.
+    func updateDockPresence() {
+        let want: NSApplication.ActivationPolicy = editors.isEmpty && videoEditors.isEmpty ? .accessory : .regular
+        if NSApp.activationPolicy() != want { NSApp.setActivationPolicy(want) }
+    }
+
     func openEditor(cg: CGImage, size: NSSize, screen: NSScreen, placeAt: NSRect? = nil) {
         let w = EditorWindow(cgImage: cg, pointSize: size, screen: screen, placeAt: placeAt)
-        w.onClosed = { [weak self] win in self?.editors.removeAll { $0 === win } }
+        w.onClosed = { [weak self] win in self?.editors.removeAll { $0 === win }; self?.updateDockPresence() }
         editors.append(w)
+        updateDockPresence()
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
         w.makeFirstResponder(w.canvas)
@@ -294,8 +302,9 @@ final class App: NSObject, NSApplicationDelegate {
 
     func openVideoEditor(_ url: URL) {
         guard let w = VideoEditorWindow(url: url, screen: screenUnderMouse()) else { NSWorkspace.shared.open(url); return }
-        w.onClosed = { [weak self] win in self?.videoEditors.removeAll { $0 === win } }
+        w.onClosed = { [weak self] win in self?.videoEditors.removeAll { $0 === win }; self?.updateDockPresence() }
         videoEditors.append(w)
+        updateDockPresence()
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
     }
