@@ -447,6 +447,8 @@ public enum AltTabSetting {
 
 /// BugOS › Misc settings (in the taskbar's preferences: the taskbar process does the work).
 public enum MiscSetting {
-    /// Shift + scroll = scroll sideways (default off).
+    /// 1.5.0's on/off switch (true = "sideways"); read only if shiftScrollMode isn't set.
     public static let shiftScroll = "shiftScrollSideways"
+    /// Shift + scroll: "default" (the Mac's own), "sideways" (always) or "vertical" (never sideways).
+    public static let shiftScrollMode = "shiftScrollMode"
 }

@@ -619,12 +619,18 @@ struct QuickCornerSection: View {
 }
 
 struct MiscSection: View {
+    @State private var shift: String = {
+        if let m: String = dockPrefs.value(MiscSetting.shiftScrollMode, default: nil as String?) { return m }
+        return dockPrefs.value(MiscSetting.shiftScroll, default: false) ? "sideways" : "default"
+    }()
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             PartOffBanner(part: .dock)
-            SettingsGroup(footer: "Hold Shift while scrolling (mouse wheel or trackpad) and up/down scrolls left/right instead, like Windows.") {
-                ToggleRow(title: "Shift to scroll sideways",
-                          isOn: dockPrefs.binding(MiscSetting.shiftScroll, default: false))
+            SettingsGroup(footer: "Mac: a mouse wheel scrolls sideways while you hold Shift. Sideways: always, trackpad too, like Windows. Up and down: Shift never turns scrolling sideways, handy in games where Shift is sprint and the wheel zooms (Roblox).") {
+                PickerRow(title: "Shift + scroll", selection: Binding(get: { shift }, set: {
+                    shift = $0; dockPrefs.set(MiscSetting.shiftScrollMode, $0)
+                }), options: [("default", "Mac"), ("sideways", "Sideways"), ("vertical", "Up and down")])
             }
         }
     }

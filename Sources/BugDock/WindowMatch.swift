@@ -33,6 +33,24 @@ enum WindowMatch {
         return out
     }
 
+    /// Apps with real windows that aren't on this desktop (on another desktop, or a full-screen one): named,
+    /// window-sized, visible windows the window server has but isn't showing here.
+    static func appsWithWindowsElsewhere() -> Set<pid_t> {
+        let info = (CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
+        var out = Set<pid_t>()
+        for d in info {
+            guard let pid = d[kCGWindowOwnerPID as String] as? Int32,
+                  (d[kCGWindowLayer as String] as? Int) == 0,
+                  (d[kCGWindowIsOnscreen as String] as? Bool) != true,
+                  (d[kCGWindowAlpha as String] as? Double ?? 1) > 0,
+                  let name = d[kCGWindowName as String] as? String, !name.isEmpty,
+                  let b = d[kCGWindowBounds as String] as? NSDictionary,
+                  let r = CGRect(dictionaryRepresentation: b), r.width >= 200, r.height >= 150 else { continue }
+            out.insert(pid)
+        }
+        return out
+    }
+
     /// Assigns AX windows (front-to-back, with frame and title) to distinct CG windows of the same app.
     /// Frames must agree (±4pt); an unambiguous title match wins first, the rest pair by stacking order.
     /// Returns AX index -> CGWindowID; unmatched AX windows are absent.

@@ -100,6 +100,9 @@ enum WindowReader {
         let matched = WindowMatch.assign(ax: visible.map { ($0.1, all[$0.0].title) }, cg: onScreen)
         var keep = Set(matched.keys.map { visible[$0].0 })
         for (i, w) in all.enumerated() where w.isMinimized || AX.frame(w.element) == nil { keep.insert(i) }
+        // Full-screen windows live on their own desktop, so they're never "on screen" from anywhere else;
+        // keep them, or the app drops off the taskbar whenever you're not in it (Roblox, games, videos).
+        for (i, w) in all.enumerated() where AX.bool(w.element, "AXFullScreen") == true { keep.insert(i) }
         return all.enumerated().filter { keep.contains($0.offset) }.map(\.element)
     }
 

@@ -13,6 +13,8 @@ struct AppGroup: Identifiable, Equatable {
     var windows: [TrackedWindow]
     var isPinned: Bool
     var isActive: Bool
+    /// Running with windows on another desktop (or full screen) that this desktop can't list.
+    var elsewhere = false
 
     var isRunning: Bool { !pids.isEmpty }
     var canPin: Bool { !id.hasPrefix("pid:") && bundleURL != nil }
@@ -227,16 +229,18 @@ final class WindowTracker: ObservableObject {
 
         axQueue.async { [weak self] in
             var byPid: [pid_t: [TrackedWindow]] = [:]
+            var elsewhere = Set<pid_t>()
             if trusted {
                 let onScreen = WindowMatch.onScreenWindows()   // current desktop only; one call for all apps
                 for pid in pids {
                     byPid[pid] = WindowReader.windows(pid: pid, onScreen: onScreen[pid] ?? [], appHidden: hidden.contains(pid))
                 }
+                elsewhere = WindowMatch.appsWithWindowsElsewhere()
             }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.apply(apps: apps, windows: byPid, trusted: trusted)
+                    self.apply(apps: apps, windows: byPid, elsewhere: elsewhere, trusted: trusted)
                     self.inFlight = false
                     if self.pending { self.pending = false; self.scheduleRefresh() }
                 }
@@ -244,7 +248,7 @@ final class WindowTracker: ObservableObject {
         }
     }
 
-    private func apply(apps: [NSRunningApplication], windows: [pid_t: [TrackedWindow]], trusted: Bool) {
+    private func apply(apps: [NSRunningApplication], windows: [pid_t: [TrackedWindow]], elsewhere: Set<pid_t>, trusted: Bool) {
         let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
         var byKey: [String: AppGroup] = [:]
         var keysInLaunchOrder: [String] = []
@@ -257,10 +261,13 @@ final class WindowTracker: ObservableObject {
                 g.pids.append(pid)
                 g.windows += w
                 if pid == front { g.isActive = true }
+                if elsewhere.contains(pid) { g.elsewhere = true }
                 byKey[key] = g
             } else {
-                byKey[key] = AppGroup(id: key, name: app.localizedName ?? key, bundleURL: app.bundleURL,
-                                      pids: [pid], windows: w, isPinned: false, isActive: pid == front)
+                var g = AppGroup(id: key, name: app.localizedName ?? key, bundleURL: app.bundleURL,
+                                 pids: [pid], windows: w, isPinned: false, isActive: pid == front)
+                g.elsewhere = elsewhere.contains(pid)
+                byKey[key] = g
                 keysInLaunchOrder.append(key)
             }
         }
@@ -275,7 +282,7 @@ final class WindowTracker: ObservableObject {
                                                  pids: [], windows: [], isPinned: true, isActive: false)
             }
         }
-        for (k, g) in byKey where !trusted || showWindowlessApps || !g.windows.isEmpty { visible[k] = g }
+        for (k, g) in byKey where !trusted || showWindowlessApps || !g.windows.isEmpty || g.elsewhere { visible[k] = g }
 
         // Pinned apps keep their spot forever; unpinned ones keep it while shown and
         // go on the end when they come back (like Windows).
@@ -333,6 +340,13 @@ final class WindowTracker: ObservableObject {
         }
         let wins = g.windows
         if wins.isEmpty {
+            // Its windows are on another desktop: bring the app forward, which goes there (opening it
+            // again would make some apps start a new window here instead).
+            if g.elsewhere, let pid = g.pids.first {
+                NSRunningApplication(processIdentifier: pid)?.activate()
+                refreshSoon()
+                return
+            }
             if let url = g.bundleURL { WindowActions.open(url) }
             else if let pid = g.pids.first { NSRunningApplication(processIdentifier: pid)?.activate() }
             refreshSoon()

@@ -427,7 +427,7 @@ struct TaskbarItem: View {
                     .fill(group.isActive ? look.accent : Color.white.opacity(0.55))
                     .frame(width: indicatorSize.width, height: indicatorSize.height)
                     .shadow(color: .black.opacity(0.5), radius: 1)
-                    .opacity(group.windows.isEmpty || look.indicator == "none" ? 0 : 1)   // only with an open window
+                    .opacity((group.windows.isEmpty && !group.elsewhere) || look.indicator == "none" ? 0 : 1)   // only with an open window
                     .padding(.bottom, 2)
             }
             .frame(width: Metrics.button, height: Metrics.button)

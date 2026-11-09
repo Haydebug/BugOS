@@ -11,10 +11,14 @@ import Carbon.HIToolbox
 import SwiftUI
 
 struct AltTabItem: Identifiable {
-    let window: TrackedWindow
+    /// nil: an app whose windows are on another desktop (or full screen); picking it goes there.
+    let window: TrackedWindow?
+    let pid: pid_t
     let appName: String
     let icon: NSImage
-    var id: String { window.id }
+    var id: String { window?.id ?? "app:\(pid)" }
+    var title: String { window.map { $0.title.isEmpty ? appName : $0.title } ?? appName }
+    var isMinimized: Bool { window?.isMinimized ?? false }
 }
 
 @MainActor
@@ -132,7 +136,7 @@ final class AltTabController {
     ///   taskbar           the order the apps sit in on the taskbar;
     ///   name              A–Z by app, then by window title.
     private func windowsInOrder() -> [AltTabItem] {
-        let groups = tracker.groups.filter { !$0.windows.isEmpty }
+        let groups = tracker.groups.filter { !$0.windows.isEmpty || ($0.elsewhere && $0.isRunning) }
         let sorted: [AppGroup]
         switch order {
         case "taskbar":
@@ -156,7 +160,11 @@ final class AltTabController {
             if order == "name" { wins.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending } }
             // Minimized ones after the app's open windows.
             for w in wins.filter({ !$0.isMinimized }) + wins.filter(\.isMinimized) {
-                out.append(AltTabItem(window: w, appName: g.name, icon: icon))
+                out.append(AltTabItem(window: w, pid: w.pid, appName: g.name, icon: icon))
+            }
+            // Its windows are on another desktop: one card for the app.
+            if wins.isEmpty, g.elsewhere, let pid = g.pids.first {
+                out.append(AltTabItem(window: nil, pid: pid, appName: g.name, icon: icon))
             }
         }
         return out
@@ -167,7 +175,7 @@ final class AltTabController {
         guard !items.isEmpty else { return }
         bar.preview.hide()
         model.items = items
-        model.thumbs = Dictionary(uniqueKeysWithValues: items.compactMap { i in Thumbnails.shared.cached(i.window).map { (i.id, $0) } })
+        model.thumbs = Dictionary(uniqueKeysWithValues: items.compactMap { i in i.window.flatMap { Thumbnails.shared.cached($0) }.map { (i.id, $0) } })
         // Like Windows: the first Tab picks the next window after the one you're in (with "recent",
         // that's the one you were in before). Shift-Tab picks the one before it.
         let current = currentIndex(in: items) ?? 0
@@ -182,8 +190,8 @@ final class AltTabController {
     private func currentIndex(in items: [AltTabItem]) -> Int? {
         guard let front = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
         if let focused = WindowReader.focusedWindow(pid: front),
-           let i = items.firstIndex(where: { $0.window.pid == front && CFEqual($0.window.element, focused) }) { return i }
-        return items.firstIndex { $0.window.pid == front }
+           let i = items.firstIndex(where: { $0.pid == front && $0.window.map { CFEqual($0.element, focused) } == true }) { return i }
+        return items.firstIndex { $0.pid == front }
     }
 
     private func layout() {
@@ -213,7 +221,8 @@ final class AltTabController {
         thumbTask = Task { @MainActor [weak self] in
             for i in items {
                 if Task.isCancelled { return }
-                if let img = await Thumbnails.shared.capture(i.window) { self?.model.thumbs[i.id] = img }
+                guard let w = i.window else { continue }
+                if let img = await Thumbnails.shared.capture(w) { self?.model.thumbs[i.id] = img }
             }
         }
     }
@@ -228,7 +237,10 @@ final class AltTabController {
         guard isOpen else { return }
         let item = model.items.indices.contains(model.selected) ? model.items[model.selected] : nil
         hide()
-        if let item { WindowActions.focus(item.window); tracker.refreshSoon() }
+        guard let item else { return }
+        if let w = item.window { WindowActions.focus(w) }
+        else { NSRunningApplication(processIdentifier: item.pid)?.activate() }   // goes to its desktop
+        tracker.refreshSoon()
     }
 
     private func cancel() { if isOpen { hide() } }
@@ -297,7 +309,7 @@ struct AltTabCard: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
                 Image(nsImage: item.icon).resizable().frame(width: 16, height: 16)
-                Text(item.window.title.isEmpty ? item.appName : item.window.title)
+                Text(item.title)
                     .font(.system(size: 12)).foregroundStyle(.white).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 0)
             }
@@ -310,12 +322,14 @@ struct AltTabCard: View {
                     RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.white.opacity(0.06))
                     Image(nsImage: item.icon).resizable().frame(width: 48, height: 48)
                 }
-                if item.window.isMinimized {
+                if item.window == nil {
+                    VStack { Spacer(); Text("On another desktop").font(.system(size: 10)).foregroundStyle(.secondary).padding(.bottom, 4) }
+                } else if item.isMinimized {
                     VStack { Spacer(); Text("Minimized").font(.system(size: 10)).foregroundStyle(.secondary).padding(.bottom, 4) }
                 }
             }
             .frame(width: thumbW, height: thumbH)
-            .opacity(item.window.isMinimized ? 0.6 : 1)
+            .opacity(item.isMinimized ? 0.6 : 1)
         }
         .padding(8)
         .frame(width: width)
