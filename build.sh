@@ -171,7 +171,7 @@ release() {  # <x.y.z>
   python3 tools/privacy-check.py --staged
   echo "== privacy check: built app and DMG =="
   python3 tools/privacy-check.py --binary "$APP" "$ROOT/dist/BugOS.dmg"
-  git commit -q -m "BugOS $v" && git tag -a "v$v" -m "BugOS $v"
+  git commit -q -m "BugOS $v" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" && git tag -a "v$v" -m "BugOS $v"
   git push -q origin main "v$v"
   gh release create "v$v" "$ROOT/dist/BugOS.dmg" --title "BugOS $v" --notes-file "$notes"
   echo "Released BugOS $v"

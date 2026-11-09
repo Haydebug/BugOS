@@ -29,6 +29,9 @@ struct BarStyle: Equatable {
     var corner = UserDefaults.standard.object(forKey: DockSetting.barCorner) as? Double ?? 14
     var indicator = UserDefaults.standard.string(forKey: DockSetting.indicator) ?? "pill"
     var accentHex = UserDefaults.standard.string(forKey: BugOSColor.accentKey) ?? ""
+    var handoff = UserDefaults.standard.string(forKey: DockSetting.handoffPlacement) ?? "island"
+    var handoffBadge = UserDefaults.standard.object(forKey: DockSetting.handoffBadge) as? Bool ?? true
+    var handoffGlass = UserDefaults.standard.object(forKey: DockSetting.handoffGlass) as? Bool ?? true
 
     var accent: Color { Color(nsColor: BugOSColor.accent) }
     var tintColor: Color? { BugOSColor.color(hex: tint).map { Color(nsColor: $0) } }
@@ -362,6 +365,8 @@ struct TaskbarView: View {
                 if !st.alignLeft && bar.isPrimary { NowPlayingWidget(model: nowPlaying) }
                 Spacer()
                 if st.alignLeft && bar.isPrimary { NowPlayingWidget(model: nowPlaying).padding(.trailing, 10) }
+                // Handoff from an iPhone/iPad (the Dock's Handoff icon) as its own island, clear of the quick corner.
+                if bar.isPrimary && st.handoff == "island" { HandoffButton(look: st, island: true).padding(.trailing, 12) }
             }
             .padding(.leading, st.floating ? 18 : 10)
             .padding(.trailing, st.floating ? 8 : 0)
@@ -384,6 +389,7 @@ struct TaskbarView: View {
                                 .onEnded { _ in dragEnded() }
                         )
                 }
+                if bar.isPrimary && style.style.handoff == "apps" { HandoffButton(look: style.style, island: false) }
             }
             .coordinateSpace(name: "bar")
             .animation(.easeOut(duration: 0.15), value: displayed.map(\.id))

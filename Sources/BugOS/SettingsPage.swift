@@ -74,7 +74,7 @@ enum PageSection: String, CaseIterable, Identifiable {
         case .general: "updates version accent colour color start at login dock tuck restart log uninstall"
         case .features: "turn off on parts taskbar file explorer squiggle disable"
         case .permissions: "accessibility screen recording full disk access microphone privacy allow"
-        case .taskbar: "size alignment centre left background opacity colour shape floating corner indicator pill previews music spotify desktops displays monitors all desktops this desktop open apps"
+        case .taskbar: "size alignment centre left background opacity colour shape floating corner indicator pill previews music spotify desktops displays monitors all desktops this desktop open apps handoff iphone ipad continuity island"
         case .altTab: "alt tab option command switch windows order sort recent alphabetical preview size minimized"
         case .snapping: "snap layouts halves quarters drag edge keyboard arrows assist split"
         case .fullScreen: "green button maximize fill zoom double-click title bar hide taskbar full screen"
@@ -557,6 +557,7 @@ struct TaskbarSection: View {
     @State private var tint: String? = dockPrefs.value(DockSetting.barTint, default: nil as String?)
     @State private var indicator: String = dockPrefs.value(DockSetting.indicator, default: "pill")
     @State private var reset = 0
+    @State private var handoff: String = dockPrefs.value(DockSetting.handoffPlacement, default: "island")
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -595,6 +596,20 @@ struct TaskbarSection: View {
                 PickerRow(title: "Running app mark", selection: Binding(get: { indicator }, set: {
                     indicator = $0; dockPrefs.set(DockSetting.indicator, $0)
                 }), options: [("pill", "Pill"), ("dot", "Dot"), ("line", "Line"), ("none", "None")])
+            }
+            Text("Handoff").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+            SettingsGroup(footer: "When your iPhone or iPad offers the app you're using (Handoff), its icon shows on the taskbar: click it to carry on here. Needs Handoff on in System Settings › General › AirDrop & Handoff.") {
+                PickerRow(title: "Show Handoff", selection: Binding(get: { handoff }, set: {
+                    handoff = $0; dockPrefs.set(DockSetting.handoffPlacement, $0)
+                }), options: [("island", "Corner island"), ("apps", "With the apps"), ("off", "Off")])
+                RowDivider()
+                ToggleRow(title: "Device badge", detail: "A small iPhone or iPad on the icon.",
+                          isOn: dockPrefs.binding(DockSetting.handoffBadge, default: true))
+                .disabled(handoff == "off").opacity(handoff == "off" ? 0.45 : 1)
+                RowDivider()
+                ToggleRow(title: "Glass behind the island", detail: "Off: just the icon in the corner.",
+                          isOn: dockPrefs.binding(DockSetting.handoffGlass, default: true))
+                .disabled(handoff != "island").opacity(handoff == "island" ? 1 : 0.45)
             }
             Text("Desktops").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
             SettingsGroup(footer: "This desktop: only apps with windows on the desktop you're on, like Windows. The bar can only change once macOS has finished the swipe to another desktop, so you see it switch over. All desktops: every running app on every desktop, like the Mac Dock, so swiping changes nothing.") {

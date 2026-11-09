@@ -55,6 +55,13 @@ public enum DockSetting {
     /// With several taskbars, which apps each shows: "all" (default, every app on every bar) or "where"
     /// (the bars of the screens its windows are on; pinned apps on the main bar).
     public static let barAppsOn = "barAppsOn"
+    /// Handoff from an iPhone/iPad (the Dock's Handoff icon): "island" (default, its own little island in the
+    /// taskbar's right corner) | "apps" (after the app icons, like the Mac Dock) | "off".
+    public static let handoffPlacement = "handoffPlacement"
+    /// The small iPhone/iPad badge on the Handoff icon (default on).
+    public static let handoffBadge = "handoffBadge"
+    /// A glass background behind the Handoff island (default on).
+    public static let handoffGlass = "handoffGlass"
 }
 
 /// Squiggle settings the BugOS page can change (stored in Squiggle's preferences).
