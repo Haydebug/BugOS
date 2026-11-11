@@ -239,6 +239,8 @@ enum SystemChanges {
 
         static func setOn(_ on: Bool) {
             UserDefaults.standard.set(on, forKey: enabledKey)
+            // The taskbar stops the accent menu in apps that were open before this (they read the Mac's setting once).
+            dockPrefs.set(KeyboardSetting.repeatOnSince, on ? Date().timeIntervalSince1970 : 0.0)
             if on {
                 saveOnce()
                 write("ApplePressAndHoldEnabled", false as NSNumber)
@@ -274,8 +276,17 @@ enum SystemChanges {
             try? FileManager.default.removeItem(at: restoreFile)
         }
 
+        /// At startup: 1.8.0 turned it on without telling the taskbar when, so the taskbar's fix for apps that
+        /// were already open had nothing to go by. Count from now.
+        static func startup() {
+            if isOn, (dockPrefs.value(KeyboardSetting.repeatOnSince, default: 0.0) as Double) == 0 {
+                dockPrefs.set(KeyboardSetting.repeatOnSince, Date().timeIntervalSince1970)
+            }
+        }
+
         /// Uninstall.
         static func restore() {
+            dockPrefs.set(KeyboardSetting.repeatOnSince, 0.0)
             guard FileManager.default.fileExists(atPath: restoreFile.path) else { return }
             restoreValues()
             applyLive()

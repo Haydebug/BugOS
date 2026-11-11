@@ -76,7 +76,7 @@ final class TaskbarController: ObservableObject {
                 // Commands are for the main bar; every bar picks up new settings.
                 if command != nil, self?.isPrimary != true { return }
                 switch command {
-                case "pause": QuickAccessHotkey.unregister(); ClipboardPanel.shared.pauseShortcut(); return   // the page is recording a shortcut
+                case "pause": QuickAccessHotkey.unregister(); FullScreenHotkey.unregister(); ClipboardPanel.shared.pauseShortcut(); return   // the page is recording a shortcut
                 case "clipboard:clear": ClipboardHistory.shared.clear(); return
                 case "clipboard:log": ClipboardHistory.shared.logSummary(); return
                 case "clipboard:open": if !ClipboardPanel.shared.isOpen { ClipboardPanel.shared.open() }; return
@@ -93,6 +93,8 @@ final class TaskbarController: ObservableObject {
                 if self?.isPrimary == true {
                     QuickAccessHotkey.reload()
                     ShiftScroll.shared.reload()
+                    KeyRepeatFix.shared.reload()
+                    FullScreenHotkey.reload()
                     Snapper.shared.reload()
                     ClipboardPanel.shared.reload()
                     self?.altTab.reload()
@@ -110,6 +112,8 @@ final class TaskbarController: ObservableObject {
             QuickAccessHotkey.reload()
             _ = altTab   // Alt-Tab listens from the start
             ShiftScroll.shared.reload()
+            KeyRepeatFix.shared.reload()
+            FullScreenHotkey.reload()
             Snapper.shared.tracker = tracker
             Snapper.shared.reload()
             ClipboardPanel.shared.reload()

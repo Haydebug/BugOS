@@ -86,6 +86,7 @@ final class BugOSDelegate: NSObject, NSApplicationDelegate {
             guard SystemChanges.ensureInApplications() else { return }
         }
         SystemChanges.firstRunIfNeeded()
+        SystemChanges.KeyRepeat.startup()
         sup.onAllPartsQuit = { [weak self] in self?.quitIfIdle() }
         DistributedNotificationCenter.default().addObserver(forName: BugOSID.command, object: nil, queue: .main) { [weak self] n in
             let cmd = n.object as? String ?? ""

@@ -77,7 +77,7 @@ enum PageSection: String, CaseIterable, Identifiable {
         case .taskbar: "size alignment centre left background opacity colour shape floating corner indicator pill previews music spotify desktops displays monitors all desktops this desktop open apps handoff iphone ipad continuity island"
         case .altTab: "alt tab option command switch windows order sort recent alphabetical preview size minimized"
         case .snapping: "snap layouts halves quarters drag edge keyboard arrows assist split"
-        case .fullScreen: "green button maximize fill zoom double-click title bar hide taskbar full screen"
+        case .fullScreen: "green button maximize fill zoom double-click title bar hide taskbar full screen alt enter option return shortcut"
         case .quickCorner: "fan corner curve tile icon colour shortcuts music ai browser discord recent add"
         case .quickAccess: "trackpad swipe gesture right edge notification center keyboard shortcut list"
         case .clipboard: "history copy paste pin win v shortcut keep clear"
@@ -814,6 +814,11 @@ struct SnappingSection: View {
 struct FullScreenSection: View {
     @State private var green: Bool = dockPrefs.value(FullScreenSetting.greenMaximizes, default: true)
     @State private var doubleClick: String = SystemChanges.Pointer.string("AppleActionOnDoubleClick", "Fill")
+    @State private var altEnter: Bool = dockPrefs.value(FullScreenSetting.altEnter, default: false)
+    @State private var altEnterKey: Shortcut? = {
+        guard let s: String = dockPrefs.value(FullScreenSetting.altEnterShortcut, default: nil as String?) else { return FullScreenSetting.defaultShortcut }
+        return Shortcut(stored: s)
+    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -821,6 +826,16 @@ struct FullScreenSection: View {
             SettingsGroup(footer: "Like Windows' maximize button: the window fills the screen above the taskbar and stays on this desktop. Click again to put it back. Hold ⌘ while clicking for the Mac's real full screen (its own desktop, menu bar hidden).") {
                 ToggleRow(title: "Green button maximizes", detail: green ? "⌘-click for real full screen." : "The Mac's own: full screen on its own desktop.",
                           isOn: Binding(get: { green }, set: { green = $0; dockPrefs.set(FullScreenSetting.greenMaximizes, $0) }))
+            }
+            SettingsGroup(footer: "Like Windows' Alt+Enter: the window you're in goes full screen (the Mac's real full screen, on its own desktop); press it again to come back. ⌥ Option is the Mac's Alt key. While it's on, apps don't get ⌥↩ themselves.") {
+                ToggleRow(title: "Alt+Enter toggles full screen",
+                          isOn: Binding(get: { altEnter }, set: { altEnter = $0; dockPrefs.set(FullScreenSetting.altEnter, $0) }))
+                RowDivider()
+                ShortcutRow(title: "Shortcut", shortcuts: Binding(get: { altEnterKey.map { [$0] } ?? [] }, set: { list in
+                                altEnterKey = list.last
+                                dockPrefs.set(FullScreenSetting.altEnterShortcut, altEnterKey?.stored ?? "")
+                            }), defaults: [FullScreenSetting.defaultShortcut], single: true, prefs: dockPrefs)
+                    .disabled(!altEnter).opacity(altEnter ? 1 : 0.45)
             }
             SettingsGroup(footer: "The Mac's own setting (also in System Settings › Desktop & Dock). Fill is Windows' maximize. Put back on uninstall.") {
                 MenuPickerRow(title: "Double-click a title bar to", selection: Binding(get: { doubleClick }, set: {

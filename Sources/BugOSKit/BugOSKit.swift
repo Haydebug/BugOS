@@ -521,9 +521,21 @@ public enum MouseSetting {
 }
 
 /// BugOS › Full Screen (in the taskbar's preferences).
+/// BugOS › Mouse & keyboard › Hold a key to repeat it (the Mac's own settings are changed by BugOS itself).
+public enum KeyboardSetting {
+    /// When "Hold a key to repeat it" went on (seconds since 1970; 0/missing = off). The taskbar process uses it
+    /// to stop the accent menu in apps that were already open then.
+    public static let repeatOnSince = "keyRepeatOnSince"
+}
+
 public enum FullScreenSetting {
     /// The green button maximizes like Windows (⌘-click = the Mac's full screen). Default on.
     public static let greenMaximizes = "greenMaximizes"
     /// The taskbar hides while an app is full screen. Default on.
     public static let hideBar = "hideBarForFullScreen"
+    /// A shortcut toggles the window you're in into / out of full screen, like Windows' Alt+Enter. Default off.
+    public static let altEnter = "altEnterFullScreen"
+    /// Shortcut.stored; missing = ⌥↩.
+    public static let altEnterShortcut = "altEnterShortcut"
+    public static let defaultShortcut = Shortcut(kVK_Return, optionKey)
 }
