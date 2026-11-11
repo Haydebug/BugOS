@@ -223,7 +223,7 @@ enum SystemChanges {
         }
     }
 
-    // MARK: Holding a key repeats it (BugOS › Mouse and keyboard)
+    // MARK: Holding a key repeats it (BugOS › Mouse & keyboard)
 
     /// Like Windows: hold a key and it types again and again (E → eeeee) instead of showing the accent
     /// menu, and Backspace keeps deleting quickly. Done with the Mac's own settings: press-and-hold off,

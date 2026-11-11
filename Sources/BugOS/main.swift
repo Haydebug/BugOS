@@ -54,7 +54,7 @@ func requestedCommand() -> (cmd: String, paths: [String]) {
     return ("reopen", [])
 }
 
-// `--key-repeat on|off|status`: BugOS › Mouse and keyboard › Hold a key to repeat it, from a script.
+// `--key-repeat on|off|status`: BugOS › Mouse & keyboard › Hold a key to repeat it, from a script.
 if let v = value(after: "--key-repeat") {
     if v == "on" || v == "off" { SystemChanges.KeyRepeat.setOn(v == "on") }
     let hid = SystemChanges.HIDKeyboard.current().map { "delay \($0.0 / 1_000_000)ms, repeat \($0.1 / 1_000_000)ms" } ?? "unknown"

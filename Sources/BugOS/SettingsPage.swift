@@ -55,7 +55,7 @@ enum PageSection: String, CaseIterable, Identifiable {
         case .snapping: "Snapping"
         case .fullScreen: "Full Screen"
         case .clipboard: "Clipboard"
-        case .mouse: "Mouse and keyboard"
+        case .mouse: "Mouse & keyboard"
         case .explorer: "File Explorer"
         }
     }
@@ -753,7 +753,7 @@ struct QuickCornerSection: View {
                 }))
             }
             SettingsGroup(footer: "The pointer only stops at an edge with no screen past it. Automatic uses a strip along the edge that's still a wall, so a screen below or beside this one (like an iPad) doesn't make the corner hard to hit.") {
-                PickerRow(title: "Trigger area", selection: Binding(get: { hitArea }, set: {
+                MenuPickerRow(title: "Trigger area", selection: Binding(get: { hitArea }, set: {
                     hitArea = $0; dockPrefs.set(QuickCornerCatalog.hitAreaKey, $0)
                 }), options: QuickCornerCatalog.hitAreas)
             }
