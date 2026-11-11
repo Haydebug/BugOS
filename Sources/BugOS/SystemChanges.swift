@@ -223,6 +223,106 @@ enum SystemChanges {
         }
     }
 
+    // MARK: Holding a key repeats it (BugOS › Mouse and keyboard)
+
+    /// Like Windows: hold a key and it types again and again (E → eeeee) instead of showing the accent
+    /// menu, and Backspace keeps deleting quickly. Done with the Mac's own settings: press-and-hold off,
+    /// a short delay and a fast repeat. What was there before comes back when it's turned off or on uninstall.
+    enum KeyRepeat {
+        static let enabledKey = "windowsKeyRepeat"
+        static let keys = ["ApplePressAndHoldEnabled", "KeyRepeat", "InitialKeyRepeat"]
+        static let restoreFile = stateDir.appendingPathComponent("restore-keyrepeat.plist")
+        /// In the Mac's 15ms units: 25 = 375ms before it starts, 2 = every 30ms (about 33 a second, Windows' default rate).
+        static let initialTicks = 25, repeatTicks = 2
+
+        static var isOn: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
+
+        static func setOn(_ on: Bool) {
+            UserDefaults.standard.set(on, forKey: enabledKey)
+            if on {
+                saveOnce()
+                write("ApplePressAndHoldEnabled", false as NSNumber)
+                write("KeyRepeat", repeatTicks as NSNumber)
+                write("InitialKeyRepeat", initialTicks as NSNumber)
+            } else {
+                restoreValues()
+            }
+            applyLive()
+        }
+
+        private static func value(_ key: String) -> Any? {
+            CFPreferencesAppSynchronize(kCFPreferencesAnyApplication)
+            return CFPreferencesCopyAppValue(key as CFString, kCFPreferencesAnyApplication)
+        }
+        private static func write(_ key: String, _ v: CFPropertyList?) {
+            CFPreferencesSetAppValue(key as CFString, v, kCFPreferencesAnyApplication)
+            CFPreferencesAppSynchronize(kCFPreferencesAnyApplication)
+        }
+
+        private static func saveOnce() {
+            guard !FileManager.default.fileExists(atPath: restoreFile.path) else { return }
+            var saved: [String: Any] = [:]
+            for k in keys { if let v = value(k) { saved[k] = v } }
+            try? FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+            (saved as NSDictionary).write(to: restoreFile, atomically: true)
+        }
+
+        /// The saved values back (a key that wasn't set before is removed, so macOS uses its default).
+        private static func restoreValues() {
+            guard let saved = NSDictionary(contentsOf: restoreFile) as? [String: Any] else { return }
+            for k in keys { write(k, saved[k] as CFPropertyList?) }
+            try? FileManager.default.removeItem(at: restoreFile)
+        }
+
+        /// Uninstall.
+        static func restore() {
+            guard FileManager.default.fileExists(atPath: restoreFile.path) else { return }
+            restoreValues()
+            applyLive()
+        }
+
+        /// The repeat speed takes effect straight away, the way System Settings does it (the keyboard
+        /// driver's own setting, in nanoseconds). Press-and-hold is read by each app; most pick it up
+        /// at once, the rest the next time they open.
+        static func applyLive() {
+            func ticks(_ k: String, _ d: Int) -> Int { (value(k) as? NSNumber)?.intValue ?? d }
+            // macOS's defaults when nothing is set: 500ms delay, 83ms repeat.
+            let initialNS = value("InitialKeyRepeat") == nil ? 500_000_000 : Int64(ticks("InitialKeyRepeat", 0)) * 15_000_000
+            let repeatNS = value("KeyRepeat") == nil ? 83_333_333 : Int64(ticks("KeyRepeat", 0)) * 15_000_000
+            HIDKeyboard.set(initial: initialNS, repeat: repeatNS)
+        }
+    }
+
+    /// IOHIDEventSystemClient (IOKit, not in the public headers): what System Settings uses to change the
+    /// key-repeat speed without logging out.
+    enum HIDKeyboard {
+        private typealias Create = @convention(c) (CFAllocator?) -> Unmanaged<AnyObject>?
+        private typealias SetProp = @convention(c) (AnyObject, CFString, CFTypeRef) -> Bool
+        private typealias CopyProp = @convention(c) (AnyObject, CFString) -> Unmanaged<CFTypeRef>?
+        private static let iokit = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW)
+
+        private static func client() -> AnyObject? {
+            guard let f = dlsym(iokit, "IOHIDEventSystemClientCreateSimpleClient") else { return nil }
+            return unsafeBitCast(f, to: Create.self)(kCFAllocatorDefault)?.takeRetainedValue()
+        }
+
+        static func set(initial: Int64, repeat: Int64) {
+            guard let c = client(), let f = dlsym(iokit, "IOHIDEventSystemClientSetProperty") else { return }
+            let setProp = unsafeBitCast(f, to: SetProp.self)
+            _ = setProp(c, "HIDInitialKeyRepeat" as CFString, NSNumber(value: initial))
+            _ = setProp(c, "HIDKeyRepeat" as CFString, NSNumber(value: `repeat`))
+        }
+
+        /// (delay, repeat) in nanoseconds, as the keyboard driver has them now.
+        static func current() -> (Int64, Int64)? {
+            guard let c = client(), let f = dlsym(iokit, "IOHIDEventSystemClientCopyProperty") else { return nil }
+            let copy = unsafeBitCast(f, to: CopyProp.self)
+            func n(_ k: String) -> Int64? { (copy(c, k as CFString)?.takeRetainedValue() as? NSNumber)?.int64Value }
+            guard let i = n("HIDInitialKeyRepeat"), let r = n("HIDKeyRepeat") else { return nil }
+            return (i, r)
+        }
+    }
+
     // MARK: Staying on this desktop
 
     /// macOS jumps to another desktop when you open an app whose windows are there ("When switching to an
@@ -371,6 +471,7 @@ enum SystemChanges {
         }
         restoreTrackpadGestures()
         Pointer.restore()
+        KeyRepeat.restore()
         DesktopSwitch.restore()
         setStartsAtLogin(false)
         // Permission entries in System Settings go too.

@@ -134,10 +134,11 @@ final class TaskbarController: ObservableObject {
         })
     }
 
-    /// The screen this bar sits on: the menu-bar screen, or an extra bar's own screen.
+    /// The screen this bar sits on: the main bar's (the menu-bar screen, or the one picked on the BugOS page
+    /// when there's only one taskbar), or an extra bar's own screen.
     var screen: NSScreen {
         if let displayID, let s = NSScreen.screens.first(where: { ScreenID.of($0) == displayID }) { return s }
-        return NSScreen.screens.first ?? NSScreen.main!
+        return TaskbarSet.mainScreen ?? NSScreen.main!
     }
 
     /// Which apps this bar shows. "All taskbars" (default): every app on every bar. "Where the window is

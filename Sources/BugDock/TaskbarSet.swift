@@ -31,6 +31,14 @@ final class TaskbarSet {
 
     static var allDisplays: Bool { UserDefaults.standard.object(forKey: DockSetting.allDisplays) as? Bool ?? true }
 
+    /// The screen the main bar is on. With "all displays" on it's the menu-bar screen; with it off it's the
+    /// one picked on the BugOS page (BugOS › Taskbar › Show the taskbar on), or the menu-bar screen.
+    static var mainScreen: NSScreen? {
+        if !allDisplays, let want = UserDefaults.standard.string(forKey: DockSetting.barDisplay), want != "primary",
+           let s = NSScreen.screens.first(where: { BugOSDisplay.uuid($0) == want }) { return s }
+        return NSScreen.screens.first
+    }
+
     var hasExtraBars: Bool { !extras.isEmpty }
     var bars: [TaskbarController] { [main] + extras.values }
 
@@ -57,7 +65,7 @@ final class TaskbarSet {
 
     /// Whether a screen has a taskbar along its bottom.
     static func hasBar(_ s: NSScreen) -> Bool {
-        s == NSScreen.screens.first || (allDisplays && NSScreen.screens.contains(s))
+        s == mainScreen || (allDisplays && NSScreen.screens.contains(s))
     }
 
     /// The screen a window is mostly on (AX frames are top-left based on the main screen).

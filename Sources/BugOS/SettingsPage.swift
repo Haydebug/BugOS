@@ -55,7 +55,7 @@ enum PageSection: String, CaseIterable, Identifiable {
         case .snapping: "Snapping"
         case .fullScreen: "Full Screen"
         case .clipboard: "Clipboard"
-        case .mouse: "Mouse"
+        case .mouse: "Mouse and keyboard"
         case .explorer: "File Explorer"
         }
     }
@@ -83,7 +83,7 @@ enum PageSection: String, CaseIterable, Identifiable {
         case .clipboard: "history copy paste pin win v shortcut keep clear"
         case .explorer: "folders finder theme windows mica liquid glass tint dark light icon navigation pane applications hidden extensions view tabs save open dialogs shortcut"
         case .squiggle: "screenshot snip record shortcuts keys save folder pen colour microphone audio thumbnail"
-        case .mouse: "pointer acceleration speed scroll wheel lines notch natural trackpad shift sideways scrolling"
+        case .mouse: "pointer acceleration speed scroll wheel lines notch natural trackpad shift sideways scrolling keyboard hold key repeat backspace accent press"
         }
     }
 
@@ -538,10 +538,29 @@ struct PermRow: View {
 }
 
 struct TaskbarSection: View {
+    /// "Primary" plus every connected screen by name (numbered when two share a name). A screen that was
+    /// picked but is unplugged stays in the list so the choice isn't lost.
+    static func displayOptions() -> [(String, String)] {
+        var opts: [(String, String)] = [("primary", "Primary display")]
+        let screens = NSScreen.screens
+        for (i, s) in screens.enumerated() {
+            guard let uuid = BugOSDisplay.uuid(s) else { continue }
+            var name = s.localizedName
+            if screens.filter({ $0.localizedName == name }).count > 1 { name += " (\(i + 1))" }
+            if i == 0 { name += " – main" }
+            opts.append((uuid, name))
+        }
+        let picked: String = dockPrefs.value(DockSetting.barDisplay, default: "primary")
+        if !opts.contains(where: { $0.0 == picked }) { opts.append((picked, "Unplugged display")) }
+        return opts
+    }
+
     @State private var peek: Double = dockPrefs.value("peekStrength", default: 0.5)
     @State private var spotifyID: String = dockPrefs.value(DockSetting.spotifyClientID, default: "")
     @State private var spotifyOn: Bool = dockPrefs.value("spotifyConnected", default: false)
     @State private var allDisplays: Bool = dockPrefs.value(DockSetting.allDisplays, default: true)
+    @State private var barDisplay: String = dockPrefs.value(DockSetting.barDisplay, default: "primary")
+    @State private var displays: [(String, String)] = TaskbarSection.displayOptions()
     @State private var fromDesktops: String = dockPrefs.value(DockSetting.appsFromDesktops, default: "this")
     @State private var stayOn: Bool = dockPrefs.value(DockSetting.stayOnDesktop, default: true)
     @State private var appsOn: String = dockPrefs.value(DockSetting.barAppsOn, default: "all")
@@ -629,6 +648,13 @@ struct TaskbarSection: View {
                 ToggleRow(title: "Show the taskbar on all displays",
                           isOn: Binding(get: { allDisplays }, set: { allDisplays = $0; dockPrefs.set(DockSetting.allDisplays, $0) }))
                 RowDivider()
+                MenuPickerRow(title: "Show the taskbar on",
+                              detail: allDisplays ? "Turn off \"all displays\" to pick one screen."
+                                                  : "Primary follows whichever screen has the menu bar.",
+                              selection: Binding(get: { barDisplay }, set: { barDisplay = $0; dockPrefs.set(DockSetting.barDisplay, $0) }),
+                              options: displays)
+                .disabled(allDisplays).opacity(allDisplays ? 0.45 : 1)
+                RowDivider()
                 PickerRow(title: "Show apps on", detail: appsOn == "where"
                             ? "Each app on the taskbar of the screen its window is on; pinned apps on the main one."
                             : "Every app on every taskbar.",
@@ -705,6 +731,9 @@ struct TaskbarSection: View {
             }
         }
         .onReceive(spotifyTimer) { _ in spotifyOn = dockPrefs.value("spotifyConnected", default: false) }   // after you sign in
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            displays = TaskbarSection.displayOptions()
+        }
     }
 }
 
@@ -713,6 +742,7 @@ struct QuickCornerSection: View {
     @State private var tile: String? = dockPrefs.value(QuickCornerCatalog.tileColorKey, default: nil as String?)
     @State private var glyph: String? = dockPrefs.value(QuickCornerCatalog.iconColorKey, default: nil as String?)
     @State private var curve: Double = dockPrefs.value(QuickCornerCatalog.curveKey, default: 1.0)
+    @State private var hitArea: String = dockPrefs.value(QuickCornerCatalog.hitAreaKey, default: "auto")
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -722,6 +752,12 @@ struct QuickCornerSection: View {
                     enabled = $0; dockPrefs.set("quickCornerEnabled", $0); SystemChanges.syncNotificationSwipe()
                 }))
             }
+            SettingsGroup(footer: "The pointer only stops at an edge with no screen past it. Automatic uses a strip along the edge that's still a wall, so a screen below or beside this one (like an iPad) doesn't make the corner hard to hit.") {
+                PickerRow(title: "Trigger area", selection: Binding(get: { hitArea }, set: {
+                    hitArea = $0; dockPrefs.set(QuickCornerCatalog.hitAreaKey, $0)
+                }), options: QuickCornerCatalog.hitAreas)
+            }
+            .disabled(!enabled).opacity(enabled ? 1 : 0.5)
             SettingsGroup(footer: "The shortcut you point at is outlined in your accent colour (General › Accent colour). Colours apply to Quick Access too.") {
                 SliderRow(title: "Curve", value: Binding(get: { curve }, set: {
                     curve = $0; dockPrefs.set(QuickCornerCatalog.curveKey, $0)
@@ -850,6 +886,7 @@ struct MouseSection: View {
     @State private var scroll = P.double("com.apple.scrollwheel.scaling", 0.3125)
     @State private var pad = P.double("com.apple.trackpad.scaling", 1)
     @State private var natural = P.bool("com.apple.swipescrolldirection", true)
+    @State private var keyRepeat = SystemChanges.KeyRepeat.isOn
     private let linearMouse = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.lujjjh.LinearMouse").isEmpty
     @State private var wheelLines: Int = dockPrefs.value(MouseSetting.wheelLines, default: 3)
     @State private var shift: String = {
@@ -909,6 +946,11 @@ struct MouseSection: View {
                 RowDivider()
                 ToggleRow(title: "Natural scrolling", detail: "Off scrolls like Windows: the page moves the opposite way to your fingers.",
                           isOn: Binding(get: { natural }, set: { natural = $0; P.set("com.apple.swipescrolldirection", $0) }))
+            }
+            Text("Keyboard").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+            SettingsGroup(footer: "Like Windows: hold E and it types eeeee instead of showing the accent menu, and holding Backspace keeps deleting, fast. Changes the Mac's own key-repeat settings; turning it off (or uninstalling) puts yours back. An app that was already open may need reopening before holding a letter repeats in it.") {
+                ToggleRow(title: "Hold a key to repeat it", detail: "Starts after a short pause, then about 33 times a second.",
+                          isOn: Binding(get: { keyRepeat }, set: { keyRepeat = $0; SystemChanges.KeyRepeat.setOn($0) }))
             }
         }
     }

@@ -197,9 +197,35 @@ final class QuickCornerController {
         TrackpadGesture.shared.reload()
         let f = bar.screen.frame
         guard Self.isEnabled, !bar.hiddenForFullScreen else { trigger.orderOut(nil); close(); return }
-        trigger.setFrame(NSRect(x: f.maxX - 4, y: f.minY, width: 4, height: 4), display: true)
+        trigger.setFrame(triggerFrame(f), display: true)
         trigger.orderFrontRegardless()
         if fan.isVisible { fan.setFrame(fanFrame, display: true) }
+    }
+
+    /// How far the strip reaches from the corner when the hit area is an edge strip.
+    static let stripLength: CGFloat = 110
+
+    /// The trigger's rectangle on screen `f`. The pointer only stops at an edge with no screen past it,
+    /// so with a screen below (an iPad under the monitor) the bottom edge isn't a wall and a 4pt corner
+    /// is nearly impossible to hit; a strip up the right edge means you just push right, roughly low.
+    private func triggerFrame(_ f: NSRect) -> NSRect {
+        let n = Self.stripLength
+        let rightStrip = NSRect(x: f.maxX - 4, y: f.minY, width: 4, height: n)
+        let bottomStrip = NSRect(x: f.maxX - n, y: f.minY, width: n, height: 4)
+        switch UserDefaults.standard.string(forKey: QuickCornerCatalog.hitAreaKey) ?? "auto" {
+        case "corner": return NSRect(x: f.maxX - 4, y: f.minY, width: 4, height: 4)
+        case "right": return rightStrip
+        case "bottom": return bottomStrip
+        default:
+            let others = NSScreen.screens.map(\.frame).filter { $0 != f }
+            // A screen touching our bottom edge near the corner / our right edge near the corner.
+            let openBelow = others.contains { abs($0.maxY - f.minY) < 2 && $0.minX < f.maxX && $0.maxX > f.maxX - n }
+            let openRight = others.contains { abs($0.minX - f.maxX) < 2 && $0.minY < f.minY + n && $0.maxY > f.minY }
+            if openBelow && !openRight { return rightStrip }
+            if openRight && !openBelow { return bottomStrip }
+            if openBelow && openRight { return rightStrip }
+            return NSRect(x: f.maxX - 4, y: f.minY, width: 4, height: 4)
+        }
     }
 
     static func height(for count: Int) -> CGFloat {
@@ -519,7 +545,7 @@ struct QuickStackRow: View {
     }
 }
 
-/// 4×4pt near-invisible view in the screen corner that notices the pointer arriving.
+/// Near-invisible view in the screen corner (4×4pt, or a strip along one edge) that notices the pointer arriving.
 final class CornerTriggerView: NSView {
     var onEnter: (() -> Void)?
     var onExit: (() -> Void)?

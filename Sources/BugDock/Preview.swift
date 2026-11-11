@@ -14,6 +14,10 @@ final class PreviewController {
     private var showWork: DispatchWorkItem?
     private var hideWork: DispatchWorkItem?
     private var overPopup = false
+    /// The taskbar button under the pointer. Moving from one button to the next, SwiftUI can report the new
+    /// button's hover-in BEFORE the old one's hover-out; the late hover-out used to cancel the new button's
+    /// pending popup (or hide the open one), so previews only showed some of the time.
+    private var hoveredItem: String?
     private var sub: AnyCancellable?
     let peek: PeekController
 
@@ -34,6 +38,7 @@ final class PreviewController {
 
     func hoverBegan(groupID id: String, anchor: CGRect) {
         guard !bar.menuOpen, bar.style.showPreviews else { return }
+        hoveredItem = id
         hideWork?.cancel()
         showWork?.cancel()
         if panel.isVisible {
@@ -57,6 +62,8 @@ final class PreviewController {
     }
 
     func hoverEnded(groupID id: String) {
+        guard hoveredItem == id else { return }   // a stale hover-out from the button we just left
+        hoveredItem = nil
         showWork?.cancel()
         scheduleHide()
     }
@@ -71,14 +78,22 @@ final class PreviewController {
         hideWork?.cancel()
         peek.end()
         panel.orderOut(nil)
+        // Drop the cards: a hidden panel keeps its SwiftUI tasks alive, and each card's live-thumbnail loop
+        // went on capturing its window once a second, all day, after the popup closed.
+        // (Next turn of the run loop: hide() is also called from inside a card's own tap handler.)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.panel.isVisible else { return }
+            self.panel.contentView = nil
+        }
         groupID = nil
+        hoveredItem = nil
         overPopup = false
     }
 
     private func scheduleHide() {
         hideWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self, !self.overPopup else { return }
+            guard let self, !self.overPopup, self.hoveredItem == nil else { return }
             self.hide()
         }
         hideWork = work
@@ -87,7 +102,7 @@ final class PreviewController {
 
     private func show(_ id: String, _ anchor: CGRect) {
         guard !bar.startMenu.isVisible else { return }
-        if groupID != id {
+        if groupID != id || panel.contentView == nil {
             groupID = id
             panel.contentView = ClickThroughHostingView(rootView: PreviewView(tracker: tracker, groupID: id, controller: self))
         }

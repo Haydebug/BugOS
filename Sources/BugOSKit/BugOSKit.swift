@@ -52,6 +52,9 @@ public enum DockSetting {
     public static let stayOnDesktop = "stayOnDesktop"
     /// A taskbar on every display, not just the main one (default on).
     public static let allDisplays = "barAllDisplays"
+    /// With "all displays" off, which screen the one taskbar is on: "primary" (default, the menu-bar screen)
+    /// or a display's UUID (`BugOSDisplay.uuid`). Falls back to the primary screen while that one's unplugged.
+    public static let barDisplay = "barDisplay"
     /// With several taskbars, which apps each shows: "all" (default, every app on every bar) or "where"
     /// (the bars of the screens its windows are on; pinned apps on the main bar).
     public static let barAppsOn = "barAppsOn"
@@ -62,6 +65,17 @@ public enum DockSetting {
     public static let handoffBadge = "handoffBadge"
     /// A glass background behind the Handoff island (default on).
     public static let handoffGlass = "handoffGlass"
+}
+
+/// Stable ids for displays (CGDirectDisplayIDs can change after a restart or replug; UUIDs don't).
+public enum BugOSDisplay {
+    public static func id(_ s: NSScreen) -> CGDirectDisplayID {
+        s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0
+    }
+    public static func uuid(_ s: NSScreen) -> String? {
+        guard let u = CGDisplayCreateUUIDFromDisplayID(id(s))?.takeRetainedValue() else { return nil }
+        return CFUUIDCreateString(nil, u) as String
+    }
 }
 
 /// Squiggle settings the BugOS page can change (stored in Squiggle's preferences).
@@ -164,6 +178,13 @@ public enum QuickCornerCatalog {
     public static let accessShortcutKey = "quickAccessShortcut"
     /// How much the fan curves away from the screen edge: 0 straight … 1 (default) … 2.
     public static let curveKey = "quickCornerCurve"
+    /// Where the pointer has to land to open the fan: "auto" (default: a strip along whichever edge
+    /// is a wall, so a screen below or to the right doesn't swallow the corner), "corner" (the exact
+    /// 4pt corner), "right" (the bottom of the right edge) or "bottom" (the right end of the bottom edge).
+    public static let hitAreaKey = "quickCornerHitArea"
+    public static let hitAreas: [(String, String)] = [
+        ("auto", "Automatic"), ("corner", "Exact corner"), ("right", "Bottom of right edge"), ("bottom", "Right end of bottom edge"),
+    ]
     /// Which app the Music shortcut opens (bundle id; default Spotify, or Apple Music without it).
     public static let musicAppKey = "quickCornerMusicApp"
     /// Which app the AI shortcut opens (bundle id; default Claude). Shared by the quick corner and Quick Access.
