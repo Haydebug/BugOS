@@ -902,6 +902,8 @@ struct MouseSection: View {
     @State private var pad = P.double("com.apple.trackpad.scaling", 1)
     @State private var natural = P.bool("com.apple.swipescrolldirection", true)
     @State private var keyRepeat = SystemChanges.KeyRepeat.isOn
+    /// Slider position 1…10 = repeat every 10…1 ticks (slow → fast).
+    @State private var repeatSpeed = Double(11 - SystemChanges.KeyRepeat.repeatTicks)
     private let linearMouse = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.lujjjh.LinearMouse").isEmpty
     @State private var wheelLines: Int = dockPrefs.value(MouseSetting.wheelLines, default: 3)
     @State private var shift: String = {
@@ -964,8 +966,14 @@ struct MouseSection: View {
             }
             Text("Keyboard").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
             SettingsGroup(footer: "Like Windows: hold E and it types eeeee instead of showing the accent menu, and holding Backspace keeps deleting, fast. Changes the Mac's own key-repeat settings; turning it off (or uninstalling) puts yours back. An app that was already open may need reopening before holding a letter repeats in it.") {
-                ToggleRow(title: "Hold a key to repeat it", detail: "Starts after a short pause, then about 33 times a second.",
+                ToggleRow(title: "Hold a key to repeat it", detail: "Starts after a short pause, then repeats at the speed below.",
                           isOn: Binding(get: { keyRepeat }, set: { keyRepeat = $0; SystemChanges.KeyRepeat.setOn($0) }))
+                if keyRepeat {
+                    RowDivider()
+                    SliderRow(title: "Repeats per second", value: Binding(get: { repeatSpeed }, set: {
+                        repeatSpeed = $0; SystemChanges.KeyRepeat.setRepeatTicks(11 - Int($0.rounded()))
+                    }), range: 1...10, step: 1, format: { "\(SystemChanges.KeyRepeat.perSecond(ticks: 11 - Int($0.rounded())))" })
+                }
             }
         }
     }

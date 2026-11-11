@@ -232,10 +232,26 @@ enum SystemChanges {
         static let enabledKey = "windowsKeyRepeat"
         static let keys = ["ApplePressAndHoldEnabled", "KeyRepeat", "InitialKeyRepeat"]
         static let restoreFile = stateDir.appendingPathComponent("restore-keyrepeat.plist")
-        /// In the Mac's 15ms units: 25 = 375ms before it starts, 2 = every 30ms (about 33 a second, Windows' default rate).
-        static let initialTicks = 25, repeatTicks = 2
+        /// In the Mac's 15ms units: 25 = 375ms before it starts.
+        static let initialTicks = 25
+        static let ticksKey = "windowsKeyRepeatTicks"
+        /// How often it repeats, in the Mac's 15ms units: 1 (every 15ms, ~67 a second) … 10 (~7 a second).
+        /// Default 2: every 30ms, about 33 a second, Windows' default rate.
+        static var repeatTicks: Int {
+            let t = UserDefaults.standard.integer(forKey: ticksKey)
+            return t == 0 ? 2 : min(max(t, 1), 10)
+        }
+        static func perSecond(ticks: Int) -> Int { Int((1000.0 / Double(ticks * 15)).rounded()) }
 
         static var isOn: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
+
+        /// The slider under the switch.
+        static func setRepeatTicks(_ t: Int) {
+            UserDefaults.standard.set(min(max(t, 1), 10), forKey: ticksKey)
+            guard isOn else { return }
+            write("KeyRepeat", repeatTicks as NSNumber)
+            applyLive()
+        }
 
         static func setOn(_ on: Bool) {
             UserDefaults.standard.set(on, forKey: enabledKey)
