@@ -141,9 +141,13 @@ final class EditorWindow: NSWindow, NSWindowDelegate {
     }
     override func cancelOperation(_ sender: Any?) { close() }
 
+    private var replaced = false
+    /// Closed because a newer snip opened its own editor: don't put this older image back on the clipboard.
+    func closeReplaced() { replaced = true; close() }
+
     func windowWillClose(_ notification: Notification) {
         canvas.commitText()
-        copyToClipboard()
+        if !replaced { copyToClipboard() }
         onClosed?(self)
     }
 }

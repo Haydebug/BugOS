@@ -319,7 +319,7 @@ final class WindowTracker: ObservableObject {
                 let onScreen = WindowMatch.onScreenWindows()   // current desktop only; one call for all apps
                 for pid in pids {
                     // All desktops (BugOS › Taskbar): every window the app has, wherever it is.
-                    byPid[pid] = allDesktops ? WindowReader.windows(pid: pid)
+                    byPid[pid] = allDesktops ? WindowReader.windowsHoldingLast(pid: pid)
                         : WindowReader.windows(pid: pid, onScreen: onScreen[pid] ?? [], appHidden: hidden.contains(pid))
                 }
                 (elsewhere, fullScreenElsewhere) = WindowMatch.appsWithWindowsElsewhere()

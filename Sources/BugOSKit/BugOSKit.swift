@@ -518,6 +518,9 @@ public enum ClipboardSetting {
 public enum MouseSetting {
     /// Lines per mouse-wheel notch, no scroll acceleration (0 = the Mac's own scrolling). Default 3.
     public static let wheelLines = "mouseWheelLines"
+    /// Windows-style click focus: a right or middle press on a background window brings it to the front and the
+    /// press still lands. On by default.
+    public static let clickFocus = "clickFocusOtherButtons"
 }
 
 /// BugOS › Full Screen (in the taskbar's preferences).

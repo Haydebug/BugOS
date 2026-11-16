@@ -14,6 +14,8 @@ final class PreviewController {
     private var showWork: DispatchWorkItem?
     private var hideWork: DispatchWorkItem?
     private var overPopup = false
+    /// The card under the pointer (for right-click).
+    var hoveredWindow: TrackedWindow?
     /// The taskbar button under the pointer. Moving from one button to the next, SwiftUI can report the new
     /// button's hover-in BEFORE the old one's hover-out; the late hover-out used to cancel the new button's
     /// pending popup (or hide the open one), so previews only showed some of the time.
@@ -104,11 +106,35 @@ final class PreviewController {
         guard !bar.startMenu.isVisible else { return }
         if groupID != id || panel.contentView == nil {
             groupID = id
-            panel.contentView = ClickThroughHostingView(rootView: PreviewView(tracker: tracker, groupID: id, controller: self))
+            let host = PreviewHostingView(rootView: PreviewView(tracker: tracker, groupID: id, controller: self))
+            host.controller = self
+            panel.contentView = host
         }
         self.anchor = anchor
         relayout()
         panel.orderFrontRegardless()
+    }
+
+    /// Right-click a preview: close that window, quit the app, or force quit it (for stuck pop-ups).
+    func rightClick() {
+        guard let w = hoveredWindow, let id = groupID, let g = tracker.groups.first(where: { $0.id == id }) else { return }
+        let tracker = self.tracker
+        let m = NSMenu()
+        m.autoenablesItems = false
+        m.addItem(MenuAction("Close window") { WindowActions.close(w); tracker.refreshSoon() })
+        if g.windows.count > 1 {
+            m.addItem(MenuAction("Close all \(g.windows.count) windows") { g.windows.forEach(WindowActions.close); tracker.refreshSoon() })
+        }
+        m.addItem(.separator())
+        m.addItem(MenuAction("Quit \(g.name)") { tracker.quit(g) })
+        m.addItem(MenuAction("Force quit \(g.name)") { ForceQuit.kill(g.pids.contains(w.pid) ? g.pids : [w.pid]); tracker.refreshSoon() })
+        // Put the preview away first and open the menu on its own at the pointer: anchored in the preview, the
+        // menu kept vanishing as the live thumbnails and window list redrew the popup under it.
+        let screenPoint = NSEvent.mouseLocation
+        hide()
+        bar.menuOpen = true
+        m.popUp(positioning: nil, at: screenPoint, in: nil)   // blocks until the menu closes
+        bar.menuOpen = false
     }
 
     private func relayout() {
@@ -244,6 +270,7 @@ struct WindowCard: View {
         }
         .onHover { h in
             hovering = h
+            if h { controller.hoveredWindow = window } else if controller.hoveredWindow?.id == window.id { controller.hoveredWindow = nil }
             if h { controller.peek.hoverBegan(window) } else { controller.peek.hoverEnded(window) }
         }
         .task(id: "\(window.id)|\(window.isMinimized)") {
@@ -254,6 +281,17 @@ struct WindowCard: View {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+    }
+}
+
+/// The preview's hosting view: right-click opens the menu for the card under the pointer.
+final class PreviewHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    weak var controller: PreviewController?
+    override func menu(for event: NSEvent) -> NSMenu? { nil }
+    override func rightMouseDown(with event: NSEvent) {}
+    override func rightMouseUp(with event: NSEvent) {
+        MainActor.assumeIsolated { controller?.rightClick() }
     }
 }
 

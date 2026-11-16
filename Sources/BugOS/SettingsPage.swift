@@ -950,6 +950,9 @@ struct MouseSection: View {
                 }), range: 0...1.5, step: 0.03125, format: { String(format: "%.2f", $0) })
                 .disabled(wheelLines != 0).opacity(wheelLines != 0 ? 0.45 : 1)
             }
+            SettingsGroup(footer: "Like Windows: right-click or middle-click a window that's behind, even on another display, and it comes to the front and gets the click too (menus open, Roblox Studio's right-drag camera works straight away). The Mac only does this for the left button.") {
+                ToggleRow(title: "Any button brings a window forward", isOn: dockPrefs.binding(MouseSetting.clickFocus, default: true))
+            }
             SettingsGroup(footer: "Mac: a mouse wheel scrolls sideways while you hold Shift. Sideways: always, trackpad too, like Windows. Up and down: Shift never turns scrolling sideways, handy in games where Shift is sprint and the wheel zooms (Roblox).") {
                 PickerRow(title: "Shift + scroll", selection: Binding(get: { shift }, set: {
                     shift = $0; dockPrefs.set(MiscSetting.shiftScrollMode, $0)

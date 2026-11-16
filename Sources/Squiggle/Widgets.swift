@@ -55,6 +55,10 @@ func spacer(_ w: CGFloat) -> NSView {
 
 // MARK: - Tool strip bound to a Canvas
 
+/// Starting frame for stacks whose real size is set later: at width 0 their own constraints can't be met and
+/// AppKit logged a layout conflict (about a thousand a day) every time one laid out before then.
+let roomyStackFrame = NSRect(x: 0, y: 0, width: 4000, height: 400)
+
 final class ToolStrip: NSStackView {
     weak var canvas: Canvas?
     private let penSw = Swatch(symbol: "paintbrush.pointed", tip: "Pen (B)")
@@ -69,7 +73,7 @@ final class ToolStrip: NSStackView {
         colorBtn = ColorButton(canvas: canvas)
         canvas.onColorKey = { [weak colorBtn] in colorBtn?.openPicker() }
         sizeBtn = SizeButton(canvas: canvas)
-        super.init(frame: .zero)
+        super.init(frame: roomyStackFrame) // see roomyStackFrame
         orientation = .horizontal
         spacing = 2
         alignment = .centerY

@@ -230,7 +230,7 @@ final class CaptureBar: NSPanel {
     private let fullSw = Swatch(symbol: "display", tip: "Full screen (F)", side: 32)
     private let micSw = Swatch(symbol: "mic.slash", tip: "Microphone", side: 32)
     private let audioSw = Swatch(symbol: "speaker.wave.2", tip: "System audio", side: 32)
-    private let stack = NSStackView()
+    private let stack = NSStackView(frame: roomyStackFrame)
 
     init(session: CaptureSession, screen: NSScreen) {
         self.session = session

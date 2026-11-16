@@ -73,7 +73,7 @@ final class RecordBar: NSPanel {
     let muteSw = Swatch(symbol: "mic.fill", tip: "Mute microphone", side: 30)
     let meter = MicMeter()
     let strip: ToolStrip
-    private let stack = NSStackView()
+    private let stack = NSStackView(frame: roomyStackFrame)
 
     init(canvas: Canvas, mic: Bool) {
         strip = ToolStrip(canvas: canvas)

@@ -93,6 +93,7 @@ final class TaskbarController: ObservableObject {
                 if self?.isPrimary == true {
                     QuickAccessHotkey.reload()
                     ShiftScroll.shared.reload()
+                    ClickFocus.shared.reload()
                     KeyRepeatFix.shared.reload()
                     FullScreenHotkey.reload()
                     Snapper.shared.reload()
@@ -112,8 +113,10 @@ final class TaskbarController: ObservableObject {
             QuickAccessHotkey.reload()
             _ = altTab   // Alt-Tab listens from the start
             ShiftScroll.shared.reload()
+            ClickFocus.shared.reload()
             KeyRepeatFix.shared.reload()
             FullScreenHotkey.reload()
+            ForceQuit.install()   // ⌃⌥⌘Q: force quit the window under the pointer
             Snapper.shared.tracker = tracker
             Snapper.shared.reload()
             ClipboardPanel.shared.reload()
@@ -330,6 +333,9 @@ final class TaskbarController: ObservableObject {
                 })
             }
             m.addItem(MenuAction(g.pids.count > 1 ? "Quit all \(g.pids.count) instances" : "Quit") { tracker.quit(g) })
+            m.addItem(MenuAction(g.pids.count > 1 ? "Force quit all \(g.pids.count) instances" : "Force quit") {
+                ForceQuit.kill(g.pids); tracker.refreshSoon()
+            })
         }
         return m
     }

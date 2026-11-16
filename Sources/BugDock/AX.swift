@@ -95,7 +95,7 @@ enum WindowReader {
     /// minimized, its app is hidden (hidden windows aren't on screen anywhere, so their Space is
     /// unknowable), or it matches a window that's on screen right now (`onScreen`, from WindowMatch).
     static func windows(pid: pid_t, onScreen: [WindowMatch.CGWin], appHidden: Bool) -> [TrackedWindow] {
-        let all = windows(pid: pid)
+        let all = windowsHoldingLast(pid: pid)
         if appHidden { return all }
         let visible = all.enumerated().compactMap { i, w -> (Int, CGRect)? in
             guard !w.isMinimized, let f = w.frame else { return nil }
@@ -116,12 +116,38 @@ enum WindowReader {
                                 kAXTitleAttribute, kAXMinimizedAttribute, "AXFullScreen"] as CFArray
 
     /// Every standard window AX reports for a process (may include other Spaces).
-    static func windows(pid: pid_t) -> [TrackedWindow] {
+    static func windows(pid: pid_t) -> [TrackedWindow] { read(pid: pid) ?? [] }
+
+    /// Last good reading per app, for when an app doesn't answer in time.
+    private static let lastLock = NSLock()
+    nonisolated(unsafe) private static var last: [pid_t: [TrackedWindow]] = [:]
+
+    /// Like `windows(pid:)`, but when the app doesn't answer (busy, or the whole Mac is swamped: AX then times
+    /// out on and off), keep what it had last time instead of reporting no windows. Reading a timeout as "no
+    /// windows" made icons drop off the bar and come back every refresh (2026-11-12, load average ~260).
+    static func windowsHoldingLast(pid: pid_t) -> [TrackedWindow] {
+        lastLock.lock(); defer { lastLock.unlock() }
+        if let fresh = read(pid: pid) {
+            last[pid] = fresh
+            if last.count > 300 { last = last.filter { NSRunningApplication(processIdentifier: $0.key) != nil } }
+            return fresh
+        }
+        return last[pid] ?? []
+    }
+
+    /// nil when the app didn't answer (timeout / cannot complete), as opposed to answering "no windows".
+    private static func read(pid: pid_t) -> [TrackedWindow]? {
         let app = AX.app(pid)
-        return AX.elements(app, kAXWindowsAttribute).compactMap { w in
+        var list: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &list)
+        if err == .cannotComplete { return nil }
+        let ws = err == .success ? ((list as? [AXUIElement]) ?? []) : []
+        var failed = false
+        let out = ws.compactMap { w -> TrackedWindow? in
             var raw: CFArray?
-            guard AXUIElementCopyMultipleAttributeValues(w, attrs, AXCopyMultipleAttributeOptions(rawValue: 0), &raw) == .success,
-                  let v = raw as? [AnyObject], v.count == 7 else { return nil }
+            let r = AXUIElementCopyMultipleAttributeValues(w, attrs, AXCopyMultipleAttributeOptions(rawValue: 0), &raw)
+            if r == .cannotComplete { failed = true }
+            guard r == .success, let v = raw as? [AnyObject], v.count == 7 else { return nil }
             func ax<T>(_ i: Int, _ type: AXValueType, _ empty: T) -> T? {
                 let o = v[i] as CFTypeRef
                 guard CFGetTypeID(o) == AXValueGetTypeID(), AXValueGetType(o as! AXValue) == type else { return nil }
@@ -143,6 +169,7 @@ enum WindowReader {
                 fullScreen: (v[6] as? NSNumber)?.boolValue ?? false
             )
         }
+        return failed ? nil : out
     }
 
     static func focusedWindow(pid: pid_t) -> AXUIElement? {

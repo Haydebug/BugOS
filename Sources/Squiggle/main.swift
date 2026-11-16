@@ -291,13 +291,29 @@ final class App: NSObject, NSApplicationDelegate {
     }
 
     func openEditor(cg: CGImage, size: NSSize, screen: NSScreen, placeAt: NSRect? = nil) {
+        // Only the newest squiggle stays open: older editors close quietly (without re-copying their
+        // image, so the new snip stays on the clipboard) instead of stacking up.
+        // onClosed is cleared first so the app doesn't flip to background mode and back in between:
+        // macOS then ignores the activate below and the new window stays behind other windows.
+        for old in editors { old.onClosed = nil; old.closeReplaced() }
+        editors.removeAll()
+        toast?.dismiss()
         let w = EditorWindow(cgImage: cg, pointSize: size, screen: screen, placeAt: placeAt)
         w.onClosed = { [weak self] win in self?.editors.removeAll { $0 === win }; self?.updateDockPresence() }
         editors.append(w)
         updateDockPresence()
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
+        w.orderFrontRegardless()
         w.makeFirstResponder(w.canvas)
+        // Opened from the corner thumbnail (a non-activating panel) Squiggle may not be the active app yet,
+        // and a policy change just before can make the first activate a no-op: try once more next turn.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak w] in
+            guard let w, w.isVisible, !w.isKeyWindow else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            w.makeKeyAndOrderFront(nil)
+            w.orderFrontRegardless()
+        }
     }
 
     func openVideoEditor(_ url: URL) {
